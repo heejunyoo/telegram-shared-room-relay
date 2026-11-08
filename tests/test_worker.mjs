@@ -426,6 +426,75 @@ async function mkExtra(extra, until) {
     await m.dispose(); }
 }
 
+
+// 18) 멱등 키는 (에이전트, 발송 의도)에 묶인다. 충돌은 409이고 다른 쪽 기록을 노출하지 않는다.
+{
+  const m = new Miniflare({
+    modules: true,
+    script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+    compatibilityDate: "2026-08-06",
+    durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+    fetchMock: mockAgent,
+    bindings: { PICKLE_TOKEN: "pk", INSTINCT_TOKEN: "in", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "7" },
+  });
+  const c = async (method, path, token, body) => {
+    const res = await m.dispatchFetch(base + path, { method, headers: { "content-type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    let data = null; try { data = await res.json(); } catch {}
+    return { status: res.status, data };
+  };
+  for (const [id, text] of [[11, "q1"], [12, "q2"]])
+    await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: id, from: { id: 7, is_bot: false }, chat: { id: 555 }, date: 1794000200 + id, text } }) });
+  const first = await c("POST", "/send", "pk", { text: "hello", idempotency_key: "k1", target: "instinct", root_user_seq: 1, reply_to: 2 });
+  check("idem: first send accepted", first.status === 200 && first.data.ok, JSON.stringify(first));
+  const same = await c("POST", "/send", "pk", { text: "hello", idempotency_key: "k1", target: "instinct", root_user_seq: 1, reply_to: 2 });
+  check("idem: true same-key retry returns original", same.data.duplicated === true && same.data.seq === first.data.seq && same.data.telegram_status === first.data.telegram_status, JSON.stringify(same));
+  const other = await c("POST", "/send", "in", { text: "hello", idempotency_key: "k1", target: "pickle", root_user_seq: 1 });
+  check("idem: other sender same key -> 409, no seq/status leak", other.status === 409 && other.data.seq === undefined && other.data.telegram_status === undefined && other.data.duplicated === undefined, JSON.stringify(other));
+  for (const [name, patch] of [["text", { text: "other" }], ["target", { target: "all" }], ["root", { root_user_seq: 2 }], ["reply_to", { reply_to: 1 }], ["reply_to dropped", { reply_to: null }]]) {
+    const r = await c("POST", "/send", "pk", { text: "hello", idempotency_key: "k1", target: "instinct", root_user_seq: 1, reply_to: 2, ...patch });
+    check("idem: same sender, different " + name + " -> 409", r.status === 409 && r.data.seq === undefined, JSON.stringify(r));
+  }
+  const all = await c("GET", "/updates?after=0", "in");
+  check("idem: conflicts wrote nothing", all.data.messages.filter((x) => x.sender === "pickle").length === 1);
+  // 빈 값 표현은 같은 의도: target 생략 = all, reply_to 생략 = null
+  const a1 = await c("POST", "/send", "pk", { text: "plain", idempotency_key: "k2" });
+  const a2 = await c("POST", "/send", "pk", { text: "plain", idempotency_key: "k2", target: "all", reply_to: null });
+  check("idem: omitted vs explicit defaults is the same intent", a2.data.duplicated === true && a2.data.seq === a1.data.seq, JSON.stringify(a2));
+  // 사용자(웹훅) 행의 키를 에이전트가 쓸 수 없다
+  const tgk = await c("POST", "/send", "pk", { text: "q1", idempotency_key: "tg:11" });
+  check("idem: agent cannot probe user-row key", tgk.status === 409 && tgk.data.seq === undefined, JSON.stringify(tgk));
+  await m.dispose();
+}
+
+// 19) 셀프테스트는 일회용 DO에서만 실행된다. 운영 대화록은 절대 건드리지 않는다.
+{
+  const m = new Miniflare({
+    modules: true,
+    script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+    compatibilityDate: "2026-08-06",
+    durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+    fetchMock: mockAgent,
+    bindings: { PICKLE_TOKEN: "pk", INSTINCT_TOKEN: "in", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "7", SELFTEST: "1" },
+  });
+  const read = async () => (await (await m.dispatchFetch(base + "/updates?after=0", { headers: { Authorization: "Bearer pk" } })).json()).messages;
+  for (const [id, text] of [[21, "prod-a"], [22, "prod-b"]])
+    await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: id, from: { id: 7, is_bot: false }, chat: { id: 555 }, date: 1794000300 + id, text } }) });
+  const before = JSON.stringify(await read());
+  const tgBeforeSt = tgCalls;
+  const w = await m.getWorker();
+  await w.scheduled({ cron: "* * * * *" });
+  const after = JSON.stringify(await read());
+  check("selftest: production transcript unchanged by a selftest run", before === after && JSON.parse(before).length === 2, before + " / " + after);
+  check("selftest: no Telegram call even without TEST_MODE", tgCalls === tgBeforeSt);
+  const ns = await m.getDurableObjectNamespace("TRANSCRIPT");
+  const prod = ns.get(ns.idFromName("shared-room"));
+  const poke = async (cmd) => (await prod.fetch("https://relay.internal/selftest", { method: "POST", body: JSON.stringify({ cmd }) })).status;
+  check("selftest: cleanup refused on the production DO", (await poke("cleanup")) === 403);
+  check("selftest: init refused on a non-empty DO", (await poke("init")) === 409);
+  check("selftest: still unchanged after direct attempts", JSON.stringify(await read()) === before);
+  await m.dispose();
+}
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
