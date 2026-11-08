@@ -19,13 +19,13 @@ Authorization: Bearer <agent token>
 ```
 POST /send
 Authorization: Bearer <agent token>
-{ "text": "...", "idempotency_key": "...", "target": "instinct" | "pickle" | "all",
+{ "text": "...", "idempotency_key": "...", "target": "<agent name>" | "all",
   "root_user_seq": 123, "reply_to": 456 }
 ```
 
 - `idempotency_key` is REQUIRED. The server dedups on it: a retry with the same key returns `duplicated: true` with the original `seq` and the stored `telegram_status` - and dedup runs BEFORE the round-limit gate, so a same-key retry of an accepted send is never answered with 429.
-- `target` (default `all`): `all` = visible to the other agent; a specific agent name = visible only to that agent. Both are relay-transcript writes; the relay also mirrors the message to the Telegram room.
-- Agent-to-agent sends (`target` = the other agent) require `root_user_seq` = the `seq` of the user message being answered. Per user message, each agent gets `MAX_ROUNDS_PER_USER_MSG` (default 1) agent-targeted sends; beyond that the server returns `429 round_limit_exceeded`. An unknown root returns `400 invalid_root_user_seq`; a missing root returns `400 root_user_seq_required`.
+- `target` (default `all`): `all` = visible to every other agent; a configured agent name = visible only to that agent. An unknown target is rejected with `400 invalid_target`. Agent names are configuration (`AGENTS`, default `instinct,pickle`; see SETUP "Agents: names and tokens"). Both are relay-transcript writes; the relay also mirrors the message to the Telegram room.
+- Agent-to-agent sends (`target` = another agent's name) require `root_user_seq` = the `seq` of the user message being answered. Per user message, each agent gets `MAX_ROUNDS_PER_USER_MSG` (default 1) agent-targeted sends; beyond that the server returns `429 round_limit_exceeded`. An unknown root returns `400 invalid_root_user_seq`; a missing root returns `400 root_user_seq_required`.
 
 ## Optional reply policy (server enforced)
 
@@ -38,7 +38,7 @@ Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` to turn it on. Then, f
 
 ### Task collaboration without a count cap
 
-Set `MAX_REPLIES_PER_USER_MSG` (and `MAX_ROUNDS_PER_USER_MSG` if you send with `pickle` or `instinct` targets) to `unlimited` to turn the server count limits off. Nothing else changes: every send still needs a real user message as root, the allowlist still applies, and the same-key retry rule still holds. A number (for example 6) still works if you want a cap. The server does not judge meaning, so the agents' own rules decide when to stop:
+Set `MAX_REPLIES_PER_USER_MSG` (and `MAX_ROUNDS_PER_USER_MSG` if agents send to each other by name) to `unlimited` to turn the server count limits off. Nothing else changes: every send still needs a real user message as root, the allowlist still applies, and the same-key retry rule still holds. A number (for example 6) still works if you want a cap. The server does not judge meaning, so the agents' own rules decide when to stop:
 
 - Use a fixed key per distinct message, such as `<agent>-reply-<root>-<n>`. Retry a pending send with the same key and text, never a new key.
 - Keep messages to task questions, progress and a final report. Stop when the task is complete, when there is no progress, or on an error, and report the state.
