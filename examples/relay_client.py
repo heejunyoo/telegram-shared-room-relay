@@ -11,7 +11,7 @@ scripts/relay_client.py - 피클 측 텔레그램 공용 방 중계 클라이언
    동일 idempotency_key로만 재시도(새 키 재발급 엄격 금지). 재시작 시 outbox 자동 복구.
 4. 상태 확정: duplicated:true 자체로 완료 판단하지 않고 telegram_status를 검증.
    - unconfirmed: 미확정 상태 유지 및 동일 키로 재확인
-   - ok: 확정 성공 (confirmed) 처리
+   - sent: 텔레그램 API가 수락함 (confirmed 처리, 수신자 단말 도달 확인은 아님)
    - failed: 확정 실패 (failed) 처리. 새 키로 자동 재전송 절대 금지
 5. 거버넌스: target 및 root_user_seq 명시, 에이전트 간 핑퐁 1회 제한.
 """
@@ -188,7 +188,7 @@ class PickleRelayClient:
             item["telegram_status"] = tg_status
             item["seq"] = res.get("seq")
 
-        if tg_status.startswith("ok:"):
+        if tg_status == "sent" or tg_status.startswith("ok:"):  # "ok:" = legacy label
             item["status"] = "confirmed"
         elif tg_status.startswith("failed:"):
             # failed 확정: 새 키로 재전송하지 않고 영속적 실패 완료 처리
