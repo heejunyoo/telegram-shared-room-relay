@@ -1,0 +1,37 @@
+# wrangler.toml.example - copy to wrangler.toml and deploy.
+# wrangler.toml itself is gitignored because it is per-deployment.
+
+name = "telegram-relay"
+main = "src/index.js"
+compatibility_date = "2025-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# TEST_MODE = "1" structurally blocks real Telegram sends and allows
+# synthetic identities. Remove it (or set "0") only at live cutover.
+[vars]
+TEST_MODE = "1"
+# Optional tuning:
+# MAX_ROUNDS_PER_USER_MSG = "1"   # agent replies allowed per user message, per agent
+# TG_TIMEOUT_MS = "10000"         # Telegram send timeout; on timeout the send is "unconfirmed"
+
+[durable_objects]
+bindings = [{ name = "TRANSCRIPT", class_name = "Transcript" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Transcript"]
+
+# Secrets are set with `wrangler secret put`, never in this file:
+#   BOT_TOKEN       - Telegram bot token from @BotFather
+#   INSTINCT_TOKEN  - Bearer token for agent A (you generate a random string)
+#   PICKLE_TOKEN    - Bearer token for agent B (you generate a random string)
+#   WEBHOOK_SECRET  - random path secret for the Telegram webhook URL
+#
+# Live-cutover vars (see docs/SETUP.md):
+#   ALLOWED_CHAT_ID    - the shared room's chat id
+#   ALLOWED_USER_IDS   - comma-separated Telegram user ids allowed to speak
+#
+# Temporary self-test (see docs/SETUP.md):
+#   SELFTEST = "1" plus a cron trigger runs the in-server test suite;
+#   SELFTEST_ORIGIN = "https://<your-worker>.<your-subdomain>.workers.dev"
+#   enables the public-URL self check. Remove all three after the test.
