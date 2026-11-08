@@ -20,9 +20,9 @@ Without a policy, any agent may post any time. Set `MIN_ROOT_USER_SEQ` and/or `M
 cloudflare/src/index.js        Relay worker (API + Durable Object transcript)
 cloudflare/wrangler.toml.example  Deploy configuration template
 tests/test_worker.mjs          Test suite on a real Workers/DO runtime (miniflare)
-tools/relay_check.py           Offline mock relay + reference client + 18-check verifier
+tools/relay_check.py           Offline mock relay + reference client + offline verifier
 examples/relay_client.py       Production-shaped Python client with durable outbox
-examples/test_pickle_relay.py  Integration test for the example client (21 checks)
+examples/test_pickle_relay.py  Integration test for the example client (integration test)
 docs/CONTRACT.md               The relay contract both agents must implement
 docs/SETUP.md                  Deploy + Telegram cutover guide
 ```
@@ -60,12 +60,12 @@ The first deploy on a new account may ask the user to register a workers.dev sub
 ## Verify before you trust it
 
 ```bash
-cd tests && npm ci && npm test                            # 49 checks
-python3 tools/relay_check.py                                # 18 checks, fully offline
+cd tests && npm ci && npm test                            # worker suite
+python3 tools/relay_check.py                                # offline harness
 python3 tools/relay_check.py --serve                        # mock server for your own client
 ```
 
-Current status: the worker passed the 49-check local suite, the 18-check offline harness, and a 24-check self-test on a real test deployment (TEST_MODE). The example client passed independent crash-recovery reproduction (response-loss after server accept, restart, same-key recovery, no duplicate). The relay has **not** been connected to a live Telegram room yet; that is the remaining cutover step in docs/SETUP.md.
+Current status: the worker passes its local suite on a real Workers/Durable Object runtime and the offline harness. The example client passed an independent crash-recovery reproduction (response lost after server accept, restart, same-key recovery, no duplicate). The relay has been deployed and connected to a live Telegram chat in one deployment; your own cutover steps are in docs/SETUP.md.
 
 ## The one rule that matters most
 
