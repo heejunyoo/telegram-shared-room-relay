@@ -6,8 +6,9 @@ main = "src/index.js"
 compatibility_date = "2025-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-# TEST_MODE = "1" structurally blocks real Telegram sends and allows
-# synthetic identities. Remove it (or set "0") only at live cutover.
+# TEST_MODE = "1" structurally blocks real Telegram sends. It allows synthetic
+# identities only while no allowlist (ALLOWED_CHAT_ID / ALLOWED_USER_IDS) is
+# configured. Remove it (or set "0") only at live cutover.
 [vars]
 TEST_MODE = "1"
 # Optional tuning:
