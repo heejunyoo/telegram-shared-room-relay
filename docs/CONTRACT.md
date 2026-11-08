@@ -34,6 +34,7 @@ Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` to turn it on. Then, f
 - `root_user_seq` is required and must be a user message: no unprompted posts (`400 root_user_seq_required`, `400 invalid_root_user_seq`).
 - `root_user_seq` must be at least `MIN_ROOT_USER_SEQ`, so an agent cannot answer messages from before the policy started (`400 root_before_activation`). Set it to the first seq you want answered.
 - Each agent may send at most `MAX_REPLIES_PER_USER_MSG` (default 1) messages per user message (`429 reply_limit_exceeded`). A same-key retry of an accepted send still returns `duplicated: true` first.
+- Optional one-off exception: `EXTRA_REPLIES="<sender>:<root_seq>,..."` allows exactly one more reply for each listed (sender, user message) pair. Other senders and other messages keep the normal limit. Set it only for a deliberate follow-up, then remove it and redeploy.
 
 When `ALLOWED_CHAT_ID` is set, outgoing sends always go to that chat, never to a chat id learned from intake.
 
