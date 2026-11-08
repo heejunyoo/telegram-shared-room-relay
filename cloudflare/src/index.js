@@ -176,7 +176,11 @@ export class Transcript {
           return json({ ok: false, error: "invalid_root_user_seq" }, 400);
         if (Number(b.root_user_seq) < Number(this.env.MIN_ROOT_USER_SEQ || 0))
           return json({ ok: false, error: "root_before_activation" }, 400);
-        var maxP = Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
+        // "unlimited" 로 설정하면 횟수 제한만 끈다(root 연결·allowlist는 그대로).
+        var unlimP = String(this.env.MAX_REPLIES_PER_USER_MSG || "")
+          .toLowerCase() === "unlimited";
+        var maxP = unlimP ? Infinity
+          : Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
         // 선택적 예외: EXTRA_REPLIES="sender:rootSeq[:추가횟수],..." 에 적힌
         // (발신자, 질문) 쌍에만 답변을 추가 허용한다(횟수 생략 시 1). 다른 쌍은 영향 없음.
         // EXTRA_REPLIES_UNTIL(유닉스 초)이 지나면 예외는 자동으로 무효가 된다.
@@ -208,7 +212,9 @@ export class Transcript {
           return json({ ok: false, error: "invalid_root_user_seq" }, 400);
         // 서버 강제 왕복 제한: 에이전트 간 발언은 사용자 질문 1건당
         // 에이전트별 MAX_ROUNDS_PER_USER_MSG(기본 1)회까지
-        var maxR = Number(this.env.MAX_ROUNDS_PER_USER_MSG || 1);
+        var maxR = String(this.env.MAX_ROUNDS_PER_USER_MSG || "")
+          .toLowerCase() === "unlimited" ? Infinity
+          : Number(this.env.MAX_ROUNDS_PER_USER_MSG || 1);
         var used = Array.from(this.sql.exec(
           "SELECT COUNT(*) AS c FROM messages " +
           "WHERE root_user_seq = ? AND sender = ? " +
