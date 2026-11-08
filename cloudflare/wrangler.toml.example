@@ -29,6 +29,8 @@ new_classes = ["Transcript"]
 #   BOT_TOKEN       - Telegram bot token from @BotFather
 #   INSTINCT_TOKEN  - Bearer token for agent A (you generate a random string)
 #   PICKLE_TOKEN    - Bearer token for agent B (you generate a random string)
+#   Other or more agents: set AGENTS = "name1,name2,name3" in [vars] and one
+#   AGENT_TOKEN_<NAME> secret per name (see docs/SETUP.md). Default: instinct,pickle.
 #   WEBHOOK_SECRET  - random path secret for the Telegram webhook URL
 #
 # Live-cutover vars (see docs/SETUP.md):
