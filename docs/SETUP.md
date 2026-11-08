@@ -39,7 +39,7 @@ Set the worker secret from the same computation without printing it, then confir
 Local suites (no deployment needed):
 
 ```bash
-cd tests && npm ci && npm test                              # 43 checks
+cd tests && npm ci && npm test                              # 49 checks
 python3 ../tools/relay_check.py                             # 18 checks, offline
 ```
 
