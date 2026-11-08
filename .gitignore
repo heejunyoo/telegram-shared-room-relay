@@ -1,0 +1,11 @@
+# secrets and local state - never commit these
+.secrets
+.env
+.dev.vars
+wrangler.toml
+node_modules/
+.wrangler/
+relay_cursor.json
+relay_outbox.json
+*.tmp
+__pycache__/
