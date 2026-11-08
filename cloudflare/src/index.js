@@ -5,14 +5,38 @@ function json(body, status) {
     headers: { "content-type": "application/json" } });
 }
 
-// Bearer 토큰이 곧 작성자. 본문의 sender 필드는 신뢰하지 않음 (스푸핑 방지)
+// 에이전트 등록부. 에이전트 이름 목록은 AGENTS(쉼표 구분, 기본 "pickle,instinct")이고
+// 각 이름의 토큰은 비밀값 AGENT_TOKEN_<이름 대문자, '-'는 '_'> 이다.
+// 하위 호환: pickle -> PICKLE_TOKEN, instinct -> INSTINCT_TOKEN 도 계속 인식한다.
+// 이름 규칙은 소문자로 시작하는 [a-z0-9_-] 최대 32자이며 "all", "user"는 예약어다.
+// 규칙에 맞지 않는 이름은 무시한다. 새 에이전트 추가 = AGENTS 갱신 + 비밀값 1개 + 재배포 (코드 수정 없음).
+var RESERVED_NAMES = ["all", "user"];
+function agentNames(env) {
+  var raw = env.AGENTS ? String(env.AGENTS) : "pickle,instinct";
+  var out = [];
+  raw.split(",").forEach(function (x) {
+    var n = x.trim().toLowerCase();
+    if (/^[a-z][a-z0-9_-]{0,31}$/.test(n) && RESERVED_NAMES.indexOf(n) === -1 &&
+        out.indexOf(n) === -1) out.push(n);
+  });
+  return out;
+}
+function agentToken(env, name) {
+  var v = env["AGENT_TOKEN_" + name.toUpperCase().replace(/-/g, "_")];
+  if (!v && name === "pickle") v = env.PICKLE_TOKEN;
+  if (!v && name === "instinct") v = env.INSTINCT_TOKEN;
+  return v ? String(v) : "";
+}
+
+// Bearer 토큰이 곧 작성자. 본문의 sender 필드는 신뢰하지 않음 (스푸핑 방지).
+// 같은 토큰이 두 이름에 설정돼 있으면 신원이 모호하므로 인증하지 않는다(fail closed).
 function authenticate(request, env) {
   var h = request.headers.get("Authorization") || "";
   var token = h.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  if (token === env.PICKLE_TOKEN) return "pickle";
-  if (token === env.INSTINCT_TOKEN) return "instinct";
-  return null;
+  var hit = agentNames(env).filter(function (n) {
+    return agentToken(env, n) === token; });
+  return hit.length === 1 ? hit[0] : null;
 }
 
 // 방·사용자 허용 목록. 허용 목록이 하나라도 설정되면 TEST_MODE 여부와 무관하게
@@ -70,15 +94,17 @@ var handler = {
       if (!body.idempotency_key)
         return json({ ok: false, error: "idempotency_key_required" }, 400);
       // 에이전트 간 발언은 기준 사용자 메시지 필수 (왕복 제한의 기준)
-      if ((body.target === "pickle" || body.target === "instinct") &&
-          !body.root_user_seq)
+      var tgt = body.target || "all";
+      if (tgt !== "all" && agentNames(env).indexOf(tgt) === -1)
+        return json({ ok: false, error: "invalid_target" }, 400);
+      if (tgt !== "all" && !body.root_user_seq)
         return json({ ok: false, error: "root_user_seq_required" }, 400);
       return stub.fetch("https://relay.internal/send", {
         method: "POST",
         body: JSON.stringify({
           sender: agent,                 // 인증 토큰으로 결정
           text: String(body.text),
-          target: body.target || "all",
+          target: tgt,
           reply_to: body.reply_to || null,
           root_user_seq: body.root_user_seq || null,
           idempotency_key: body.idempotency_key }) });
@@ -203,7 +229,7 @@ export class Transcript {
           return json({ ok: false, error: "reply_limit_exceeded",
             root_user_seq: b.root_user_seq }, 429);
       }
-      if (b.target === "pickle" || b.target === "instinct") {
+      if (b.target && b.target !== "all") {   // 에이전트 대상 발언
         if (!b.root_user_seq)
           return json({ ok: false, error: "root_user_seq_required" }, 400);
         var root = Array.from(this.sql.exec(
@@ -218,7 +244,7 @@ export class Transcript {
         var used = Array.from(this.sql.exec(
           "SELECT COUNT(*) AS c FROM messages " +
           "WHERE root_user_seq = ? AND sender = ? " +
-          "AND (target = 'pickle' OR target = 'instinct')",
+          "AND target != 'all'",
           b.root_user_seq, b.sender))[0].c;
         if (used >= maxR)
           return json({ ok: false, error: "round_limit_exceeded",
