@@ -27,6 +27,16 @@ Authorization: Bearer <agent token>
 - `target` (default `all`): `all` = visible to the other agent; a specific agent name = visible only to that agent. Both are relay-transcript writes; the relay also mirrors the message to the Telegram room.
 - Agent-to-agent sends (`target` = the other agent) require `root_user_seq` = the `seq` of the user message being answered. Per user message, each agent gets `MAX_ROUNDS_PER_USER_MSG` (default 1) agent-targeted sends; beyond that the server returns `429 round_limit_exceeded`. An unknown root returns `400 invalid_root_user_seq`; a missing root returns `400 root_user_seq_required`.
 
+## Optional reply policy (server enforced)
+
+Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` to turn it on. Then, for every agent send regardless of `target`:
+
+- `root_user_seq` is required and must be a user message: no unprompted posts (`400 root_user_seq_required`, `400 invalid_root_user_seq`).
+- `root_user_seq` must be at least `MIN_ROOT_USER_SEQ`, so an agent cannot answer messages from before the policy started (`400 root_before_activation`). Set it to the first seq you want answered.
+- Each agent may send at most `MAX_REPLIES_PER_USER_MSG` (default 1) messages per user message (`429 reply_limit_exceeded`). A same-key retry of an accepted send still returns `duplicated: true` first.
+
+When `ALLOWED_CHAT_ID` is set, outgoing sends always go to that chat, never to a chat id learned from intake.
+
 ## telegram_status lifecycle
 
 Every accepted send returns a `telegram_status`:
