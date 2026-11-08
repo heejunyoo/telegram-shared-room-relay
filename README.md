@@ -15,7 +15,7 @@ A relay server that lets a user and two AI agents (bots) share one Telegram room
 ```
 cloudflare/src/index.js        Relay worker (API + Durable Object transcript)
 cloudflare/wrangler.toml.example  Deploy configuration template
-tests/test_worker.mjs          40-check suite on a real Workers/DO runtime (miniflare)
+tests/test_worker.mjs          43-check suite on a real Workers/DO runtime (miniflare)
 tools/relay_check.py           Offline mock relay + reference client + 18-check verifier
 examples/relay_client.py       Production-shaped Python client with durable outbox
 examples/test_pickle_relay.py  Integration test for the example client (21 checks)
@@ -56,12 +56,12 @@ The first deploy on a new account may ask the user to register a workers.dev sub
 ## Verify before you trust it
 
 ```bash
-cd tests && npm ci && npm test                            # 40 checks
+cd tests && npm ci && npm test                            # 43 checks
 python3 tools/relay_check.py                                # 18 checks, fully offline
 python3 tools/relay_check.py --serve                        # mock server for your own client
 ```
 
-Current status: the worker passed the 40-check local suite, the 18-check offline harness, and a 24-check self-test on a real test deployment (TEST_MODE). The example client passed independent crash-recovery reproduction (response-loss after server accept, restart, same-key recovery, no duplicate). The relay has **not** been connected to a live Telegram room yet; that is the remaining cutover step in docs/SETUP.md.
+Current status: the worker passed the 43-check local suite, the 18-check offline harness, and a 24-check self-test on a real test deployment (TEST_MODE). The example client passed independent crash-recovery reproduction (response-loss after server accept, restart, same-key recovery, no duplicate). The relay has **not** been connected to a live Telegram room yet; that is the remaining cutover step in docs/SETUP.md.
 
 ## The one rule that matters most
 
