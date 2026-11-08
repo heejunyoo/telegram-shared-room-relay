@@ -277,6 +277,10 @@ def run_tests():
         c4.flush_outbox()
         assert_check("5xx 후 같은 키로 재시도되어 confirmed",
                      k4 == ["cls-4", "cls-4"] and c4.outbox["cls-4"]["status"] == "confirmed")
+        c5, k5 = fresh([(200, {"ok": True, "seq": 8, "telegram_status": "unconfirmed"}), (503, {})])
+        c5.send("e", target="all", idempotency_key="cls-5")
+        assert_check("unconfirmed 재확인 중 5xx는 unconfirmed 유지(복구 가능)",
+                     c5.outbox["cls-5"]["status"] == "unconfirmed" and k5 == ["cls-5", "cls-5"])
         shutil.rmtree(stub_dir)
 
         print("\n" + "=" * 72)
