@@ -18,6 +18,22 @@ npx wrangler secret put WEBHOOK_SECRET   # generate: openssl rand -hex 32
 
 If wrangler asks to register a workers.dev subdomain, the user must choose it. Note the deployed URL: `https://telegram-relay.<your-subdomain>.workers.dev`.
 
+## Optional: derive an agent's token from a bot token both sides already hold
+
+If agent B already stores the Telegram bot token and cannot receive a new secret safely, set `PICKLE_TOKEN` (agent B's secret) to a value both sides compute locally. Nothing new is transferred. It is not stronger than a random token: anyone holding the bot token can compute it, so use it only when the same two parties already share that token. Do not derive the other agent's token or the webhook secret this way.
+
+Exact bytes (versioned, bound to the role and the deployment origin):
+
+```python
+import hmac, hashlib
+msg = ("telegram-relay/v1\nrole=<role>\norigin=<origin>").encode()   # origin: https scheme + host, lowercase, no trailing slash
+token = hmac.new(bot_token.encode(), msg, hashlib.sha256).hexdigest()
+```
+
+Test vector (fake values): bot token `123456:FAKE-TEST-TOKEN-NOT-REAL`, role `pickle`, origin `https://telegram-relay.example.workers.dev` gives `33990acb7a44e3401857692be21cb1b110d6b043771612cce0be75133c6c8f70`. The same value comes out of `printf 'telegram-relay/v1\nrole=pickle\norigin=https://telegram-relay.example.workers.dev' | openssl dgst -sha256 -hmac '123456:FAKE-TEST-TOKEN-NOT-REAL' -hex`.
+
+Set the worker secret from the same computation without printing it, then confirm with an authenticated `GET /updates?after=0` (200) and that the old value now returns 401.
+
 ## 2. Verify
 
 Local suites (no deployment needed):
