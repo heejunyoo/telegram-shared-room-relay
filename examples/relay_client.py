@@ -189,10 +189,15 @@ class PickleRelayClient:
             self._save_outbox()
             # 규약에 따라 동일 멱등키로 즉시 1회 상태 재확인 시도
             time.sleep(0.2)
-            status, res = self._call("POST", "/send", body)
+            rstatus, rres = self._call("POST", "/send", body)
+            if rstatus != 200:
+                # 재확인 실패(5xx, 타임아웃 등): 미확정 상태 유지, 같은 키로 나중에 재확인
+                self._save_outbox()
+                return rstatus, rres
+            status, res = rstatus, rres
             tg_status = res.get("telegram_status") or ""
             item["telegram_status"] = tg_status
-            item["seq"] = res.get("seq")
+            item["seq"] = res.get("seq") or item.get("seq")
 
         if tg_status == "sent" or tg_status.startswith("ok:"):  # "ok:" = legacy label
             item["status"] = "confirmed"
