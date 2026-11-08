@@ -360,6 +360,65 @@ async function mkExtra(extra, until) {
   await m.dispose();
 }
 
+
+// 17) 설정만으로 에이전트 추가: AGENTS + AGENT_TOKEN_<이름> (코드 수정 없음)
+{
+  const mkReg = async (extra) => {
+    const m = new Miniflare({
+      modules: true,
+      script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+      compatibilityDate: "2026-08-06",
+      durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+      fetchMock: mockAgent,
+      bindings: { BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "7", ...extra },
+    });
+    const c = async (method, path, token, body) => {
+      const res = await m.dispatchFetch(base + path, { method, headers: { "content-type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+      let data = null; try { data = await res.json(); } catch {}
+      return { status: res.status, data };
+    };
+    await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: 1, from: { id: 7, is_bot: false }, chat: { id: 555 }, date: 1794000100, text: "q" } }) });
+    return { m, c };
+  };
+  // 기본값(AGENTS 미설정): 기존 두 신원과 PICKLE_TOKEN/INSTINCT_TOKEN 그대로
+  { const { m, c } = await mkReg({ PICKLE_TOKEN: "pk", INSTINCT_TOKEN: "in" });
+    check("registry default: legacy tokens still authenticate", (await c("GET", "/updates?after=0", "pk")).status === 200 && (await c("GET", "/updates?after=0", "in")).status === 200);
+    check("registry default: unknown token 401", (await c("GET", "/updates?after=0", "zz")).status === 401);
+    const r = await c("POST", "/send", "pk", { text: "a", idempotency_key: "d1", target: "instinct", root_user_seq: 1 });
+    check("registry default: agent target works", r.status === 200 && r.data.telegram_status === "blocked:test_mode", JSON.stringify(r));
+    check("registry default: unknown target rejected", (await c("POST", "/send", "pk", { text: "a", idempotency_key: "d2", target: "ghost", root_user_seq: 1 })).data.error === "invalid_target");
+    await m.dispose(); }
+  // 제3 에이전트: 설정만으로 추가, 라우팅과 echo 제거 동작
+  { const { m, c } = await mkReg({ AGENTS: "pickle,instinct,data-analyst", PICKLE_TOKEN: "pk", INSTINCT_TOKEN: "in", AGENT_TOKEN_DATA_ANALYST: "da" });
+    check("third agent authenticates", (await c("GET", "/updates?after=0", "da")).status === 200);
+    const r = await c("POST", "/send", "da", { text: "to pickle", idempotency_key: "t1", target: "pickle", root_user_seq: 1 });
+    check("third agent: targeted send ok", r.status === 200 && r.data.ok === true, JSON.stringify(r));
+    check("third agent: target needs root", (await c("POST", "/send", "da", { text: "x", idempotency_key: "t2", target: "pickle" })).data.error === "root_user_seq_required");
+    check("third agent: pickle sees it", (await c("GET", "/updates?after=0", "pk")).data.messages.some((x) => x.text === "to pickle" && x.sender === "data-analyst"));
+    check("third agent: instinct does not see pickle-only msg", !(await c("GET", "/updates?after=0", "in")).data.messages.some((x) => x.text === "to pickle"));
+    check("third agent: own message hidden from itself", !(await c("GET", "/updates?after=0", "da")).data.messages.some((x) => x.sender === "data-analyst"));
+    const r2 = await c("POST", "/send", "pk", { text: "back", idempotency_key: "t3", target: "data-analyst", root_user_seq: 1 });
+    check("targeting the third agent works", r2.status === 200);
+    check("third agent sees message targeted at it", (await c("GET", "/updates?after=0", "da")).data.messages.some((x) => x.text === "back"));
+    await m.dispose(); }
+  // 새 이름은 추가만 되고 기존 신원 호환 유지, 명시 목록에서 빠지면 토큰도 무효
+  { const { m, c } = await mkReg({ AGENTS: "alpha,beta", AGENT_TOKEN_ALPHA: "a1", AGENT_TOKEN_BETA: "b1", PICKLE_TOKEN: "pk" });
+    check("explicit list: alpha ok", (await c("GET", "/updates?after=0", "a1")).status === 200);
+    check("explicit list: legacy token not in list rejected", (await c("GET", "/updates?after=0", "pk")).status === 401);
+    await m.dispose(); }
+  // 같은 토큰을 두 이름에 설정하면 모호하므로 인증 거부(fail closed)
+  { const { m, c } = await mkReg({ AGENTS: "alpha,beta", AGENT_TOKEN_ALPHA: "same", AGENT_TOKEN_BETA: "same" });
+    check("duplicate token fails closed", (await c("GET", "/updates?after=0", "same")).status === 401);
+    await m.dispose(); }
+  // 잘못된 이름(예약어, 형식 오류)은 무시, 토큰 미설정 이름은 접속 불가
+  { const { m, c } = await mkReg({ AGENTS: "all,user,Bad Name,ok-1,nosecret", AGENT_TOKEN_ALL: "x", AGENT_TOKEN_USER: "y", AGENT_TOKEN_OK_1: "o1" });
+    check("reserved names ignored", (await c("GET", "/updates?after=0", "x")).status === 401 && (await c("GET", "/updates?after=0", "y")).status === 401);
+    check("valid name works, unset secret name has no access", (await c("GET", "/updates?after=0", "o1")).status === 200 && (await c("GET", "/updates?after=0", "")).status === 401);
+    const r = await c("POST", "/send", "o1", { text: "z", idempotency_key: "n1", target: "all" });
+    check("sender label comes from token", r.status === 200);
+    await m.dispose(); }
+}
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
