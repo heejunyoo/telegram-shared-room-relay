@@ -15,10 +15,12 @@ function authenticate(request, env) {
   return null;
 }
 
-// 방·사용자 허용 목록. 라이브 모드에서는 미설정이면 닫힘(fail-closed).
-// TEST_MODE=1(실 방 미연결 시험)에서만 합성 신원을 허용한다.
+// 방·사용자 허용 목록. 허용 목록이 하나라도 설정되면 TEST_MODE 여부와 무관하게
+// 항상 강제한다(둘 다 있어야 통과, fail-closed). 합성 신원은 허용 목록이 아예
+// 없고 TEST_MODE=1일 때(실 방 미연결 로컬/모의 시험)에만 허용한다.
 function allowlistOk(msg, env) {
-  if (env.TEST_MODE === "1") return true;
+  var configured = !!(env.ALLOWED_CHAT_ID || env.ALLOWED_USER_IDS);
+  if (!configured && env.TEST_MODE === "1") return true;
   if (!env.ALLOWED_CHAT_ID || !env.ALLOWED_USER_IDS) return false;
   if (String(msg.chat && msg.chat.id) !== String(env.ALLOWED_CHAT_ID))
     return false;
