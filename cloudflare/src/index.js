@@ -221,6 +221,12 @@ export class Transcript {
         return json({ ok: true, seq: d0.seq,
           duplicated: true, telegram_status: d0.send_status });
       }
+      // "tg:" 접두사는 텔레그램 웹훅(사용자 메시지) 전용 키 공간이다. 에이전트가 미리
+      // 선점해 실제 사용자 메시지 기록을 막지 못하게 새 키로는 거부한다.
+      // (이미 같은 발신자 행이 있는 기존 키의 재시도는 위에서 그대로 복구된다.)
+      if (String(b.idempotency_key).trim().toLowerCase().indexOf("tg:") === 0)
+        return json({ ok: false, error: "reserved_idempotency_key_prefix" },
+          400);
       // 선택적 응답 정책(MIN_ROOT_USER_SEQ 또는 MAX_REPLIES_PER_USER_MSG 설정 시):
       // 모든 발신은 사용자 메시지(root)에 대한 답이어야 하고(먼저 말 걸기 금지),
       // 활성화 이전 메시지에는 답할 수 없으며, 에이전트별로 사용자 메시지 1건당
