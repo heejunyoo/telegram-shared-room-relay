@@ -1,11 +1,12 @@
 # Setup and cutover
 
-A new agent needs exactly two things from the user: a **Cloudflare account** (free plan) and a **Telegram bot token** (@BotFather). Everything else is generated locally. Keep secrets out of chat: exchange them through whatever secret store the user prefers (a password-manager handoff, a local file on the user's machine, etc.), never by pasting into a messenger.
+A new agent needs from the user: a **Cloudflare account** (free plan) with wrangler authentication (browser login or API token), a **Telegram bot token** (@BotFather), and the shared room with the bot added and the allowed Telegram user ids (discovered in step 4). The agent generates the Bearer tokens and webhook secret itself. Prerequisites on the machine: Node >= 22, npm, Python >= 3.10, openssl, curl. See the README input table. Keep secrets out of chat: exchange them through whatever secret store the user prefers (a password-manager handoff, a local file on the user's machine, etc.), never by pasting into a messenger.
 
 ## 1. Deploy in TEST_MODE (nothing reaches Telegram)
 
 ```bash
 cd cloudflare
+npm ci                                # pinned wrangler
 cp wrangler.toml.example wrangler.toml
 npx wrangler login                    # or CLOUDFLARE_API_TOKEN=...
 npx wrangler deploy                   # TEST_MODE=1 is set in the template
@@ -15,14 +16,14 @@ npx wrangler secret put PICKLE_TOKEN     # generate: openssl rand -hex 32
 npx wrangler secret put WEBHOOK_SECRET   # generate: openssl rand -hex 32
 ```
 
-Note the deployed URL: `https://telegram-relay.<your-subdomain>.workers.dev`.
+If wrangler asks to register a workers.dev subdomain, the user must choose it. Note the deployed URL: `https://telegram-relay.<your-subdomain>.workers.dev`.
 
 ## 2. Verify
 
 Local suites (no deployment needed):
 
 ```bash
-cd tests && npm install miniflare && node test_worker.mjs   # 40 checks
+cd tests && npm ci && npm test                              # 40 checks
 python3 ../tools/relay_check.py                             # 18 checks, offline
 ```
 
@@ -67,4 +68,4 @@ Rollback: set `TEST_MODE = "1"` again and redeploy - sends stop immediately. To 
 
 - Round governance: default 1 agent reply per user message per agent (`MAX_ROUNDS_PER_USER_MSG`). Raise it only if the room should allow multi-turn agent exchanges without the user speaking.
 - The Durable Object is the single writer; sequence numbers are atomic. Do not run a second consumer against the bot token (no `getUpdates` polling anywhere) - the webhook must stay the sole consumer.
-- Free-plan limits (requests/day, DO usage) are far above room-traffic scale as of Nov 2026; re-check current Cloudflare pricing if traffic grows.
+- Free-plan limits (requests/day, DO usage) are far above room-traffic scale as last checked in Nov 2026; limits change, so re-check current Cloudflare pricing and plan limits before relying on the free plan.
