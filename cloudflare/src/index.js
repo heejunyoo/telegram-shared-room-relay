@@ -177,12 +177,20 @@ export class Transcript {
         if (Number(b.root_user_seq) < Number(this.env.MIN_ROOT_USER_SEQ || 0))
           return json({ ok: false, error: "root_before_activation" }, 400);
         var maxP = Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
-        // 선택적 1회 예외: EXTRA_REPLIES="sender:rootSeq,..." 에 적힌
-        // (발신자, 질문) 쌍에만 답변 1회를 더 허용한다. 다른 쌍은 영향 없음.
-        var pairKey = b.sender + ":" + b.root_user_seq;
-        if (String(this.env.EXTRA_REPLIES || "").split(",")
-              .map(function (x) { return x.trim(); }).indexOf(pairKey) !== -1)
-          maxP += 1;
+        // 선택적 예외: EXTRA_REPLIES="sender:rootSeq[:추가횟수],..." 에 적힌
+        // (발신자, 질문) 쌍에만 답변을 추가 허용한다(횟수 생략 시 1). 다른 쌍은 영향 없음.
+        // EXTRA_REPLIES_UNTIL(유닉스 초)이 지나면 예외는 자동으로 무효가 된다.
+        var untilSec = Number(this.env.EXTRA_REPLIES_UNTIL || 0);
+        if (!untilSec || Date.now() / 1000 < untilSec) {
+          var pairPfx = b.sender + ":" + b.root_user_seq;
+          String(this.env.EXTRA_REPLIES || "").split(",").forEach(function (x) {
+            var parts = x.trim().split(":");
+            if (parts.length >= 2 && parts[0] + ":" + parts[1] === pairPfx) {
+              var n = parts.length > 2 ? Number(parts[2]) : 1;
+              if (n > 0 && n <= 20) maxP += Math.floor(n);
+            }
+          });
+        }
         var usedP = Array.from(this.sql.exec(
           "SELECT COUNT(*) AS c FROM messages " +
           "WHERE root_user_seq = ? AND sender = ?",
