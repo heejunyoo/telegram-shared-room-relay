@@ -312,6 +312,25 @@ q = await send6("instinct-secret", { text: "2", idempotency_key: "e-7", root_use
 check("extra: other question not widened", q.status === 429, JSON.stringify(q));
 await mf6.dispose();
 
+// 16d) unlimited: 횟수 제한만 해제, root 연결은 유지
+{
+  const m = new Miniflare({
+    modules: true,
+    script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+    compatibilityDate: "2026-08-06",
+    durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+    fetchMock: mockAgent,
+    bindings: { PICKLE_TOKEN: "pickle-secret", INSTINCT_TOKEN: "instinct-secret", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "777", MIN_ROOT_USER_SEQ: "1", MAX_REPLIES_PER_USER_MSG: "unlimited", MAX_ROUNDS_PER_USER_MSG: "unlimited" },
+  });
+  await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: 961, from: { id: 777, is_bot: false }, chat: { id: 555 }, date: 1794000080, text: "질문" } }) });
+  const s = async (tok, body) => { const r = await m.dispatchFetch(base + "/send", { method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + tok }, body: JSON.stringify(body) }); return r.status; };
+  const st = []; for (let n = 0; n < 12; n++) st.push(await s("instinct-secret", { text: "x", idempotency_key: "u" + n, root_user_seq: 1, target: n % 2 ? "pickle" : "all" }));
+  check("unlimited: 12 sends incl. targeted all accepted", st.every((c) => c === 200), JSON.stringify(st));
+  check("unlimited: still needs root", (await s("instinct-secret", { text: "x", idempotency_key: "u-noroot" })) === 400);
+  check("unlimited: root must be a user row", (await s("instinct-secret", { text: "x", idempotency_key: "u-bad", root_user_seq: 999 })) === 400);
+  await m.dispose();
+}
+
 // 16c) 추가 횟수 지정, 만료
 async function mkExtra(extra, until) {
   const m = new Miniflare({
