@@ -137,7 +137,7 @@ class MockRelay:
                 status = "failed:simulated"
             else:
                 self.tg_counter += 1
-                status = "ok:%d" % self.tg_counter
+                status = "sent"
             with self.lock:
                 self.db.execute(
                     "UPDATE messages SET send_status=? WHERE seq=?",
