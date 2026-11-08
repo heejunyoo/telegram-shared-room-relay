@@ -246,6 +246,39 @@ def run_tests():
         restarted_client2 = PickleRelayClient(base_url, "pk-test-token", state_path=pk_state, outbox_path=pk_outbox)
         assert_check("커서 복구 후 중복 수신 0건", len(restarted_client2.poll()) == 0)
 
+        # 5-6. 상태 분류: 서버 응답을 흉내 내는 스텁으로 outbox 상태와 재시도 키를 확인
+        stub_dir = tempfile.mkdtemp(prefix="relay-classify-")
+        def fresh(responses):
+            c = PickleRelayClient(base_url, "x", state_path=os.path.join(stub_dir, "c.json"),
+                                  outbox_path=os.path.join(stub_dir, "o%d.json" % time.time_ns()))
+            seen = []
+            def fake(method, path, body=None, timeout=15):
+                seen.append(body["idempotency_key"])
+                return responses.pop(0) if len(responses) > 1 else responses[0]
+            c._call = fake
+            return c, seen
+        c1, k1 = fresh([(200, {"ok": True, "seq": 5, "telegram_status": "blocked:test_mode"})])
+        c1.send("a", target="all", idempotency_key="cls-1")
+        assert_check("blocked:test_mode는 blocked 종결, flush에서 재전송 없음",
+                     c1.outbox["cls-1"]["status"] == "blocked" and not c1.flush_outbox())
+        c2, k2 = fresh([(200, {"ok": True, "seq": 6, "telegram_status": "pending"})])
+        c2.send("b", target="all", idempotency_key="cls-2")
+        assert_check("pending/알 수 없는 상태는 복구 대상으로 남음",
+                     c2.outbox["cls-2"]["status"] == "unknown")
+        c2._call = lambda m, p, body=None, timeout=15: (200, {"ok": True, "seq": 6, "telegram_status": "sent"})
+        c2.flush_outbox()
+        assert_check("복구 시 같은 키로 확인되어 confirmed", c2.outbox["cls-2"]["status"] == "confirmed")
+        c3, k3 = fresh([(409, {"ok": False, "error": "idempotency_key_reused_with_different_request"})])
+        c3.send("c", target="all", idempotency_key="cls-3")
+        assert_check("409 키 충돌은 conflict 종결, 새 키 재전송 없음",
+                     c3.outbox["cls-3"]["status"] == "conflict" and not c3.flush_outbox() and k3 == ["cls-3"])
+        c4, k4 = fresh([(503, {}), (200, {"ok": True, "seq": 7, "telegram_status": "sent"})])
+        c4.send("d", target="all", idempotency_key="cls-4")
+        c4.flush_outbox()
+        assert_check("5xx 후 같은 키로 재시도되어 confirmed",
+                     k4 == ["cls-4", "cls-4"] and c4.outbox["cls-4"]["status"] == "confirmed")
+        shutil.rmtree(stub_dir)
+
         print("\n" + "=" * 72)
         print(f"🎉 전 항목 통과 완료! (총 {passed_count}개 세부 검증 항목 100% 통과)")
         print("=" * 72)
