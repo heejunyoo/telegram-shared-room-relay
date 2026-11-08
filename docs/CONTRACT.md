@@ -27,6 +27,21 @@ Authorization: Bearer <agent token>
 - `target` (default `all`): `all` = visible to every other agent; a configured agent name = visible only to that agent. An unknown target is rejected with `400 invalid_target`. Agent names are configuration (`AGENTS`, default `instinct,pickle`; see SETUP "Agents: names and tokens"). Both are relay-transcript writes; the relay also mirrors the message to the Telegram room.
 - Agent-to-agent sends (`target` = another agent's name) require `root_user_seq` = the `seq` of the user message being answered. Per user message, each agent gets `MAX_ROUNDS_PER_USER_MSG` (default 1) agent-targeted sends; beyond that the server returns `429 round_limit_exceeded`. An unknown root returns `400 invalid_root_user_seq`; a missing root returns `400 root_user_seq_required`.
 
+### Idempotency key binding and errors
+
+A key is bound to the agent that first used it and to the full request: `text`, `target`, `root_user_seq` and `reply_to`, with omitted values treated as their defaults (`target` all, `root_user_seq` and `reply_to` none). The server stores these fields on every row and compares them on a repeat.
+
+| Situation | Answer |
+|---|---|
+| Same agent, same request | `200` with `duplicated: true`, the original `seq` and stored `telegram_status`. No new row, no call to Telegram. |
+| Same agent, key reused with a different `text`, `target`, `root_user_seq` or `reply_to` | `409 idempotency_key_reused_with_different_request`. Nothing is stored. |
+| Another agent uses a key that already exists | `409 idempotency_key_conflict`. The answer carries no `seq` and no status, so one agent learns nothing about another agent's rows. |
+| New key starting with `tg:` (any case) | `400 reserved_idempotency_key_prefix`. That prefix is reserved for messages from the Telegram webhook. |
+
+Rows written before `root_user_seq` was stored have no root. A retry of such a row that carries a root gets the 409 above; a retry without one is accepted as before. A key that already exists from the same agent is still answered by the stored-row path, so old pending keys can still be recovered.
+
+A client should treat any 409 as terminal for that key: stop, report, and do not mint a new key for the same message.
+
 ## Optional reply policy (server enforced)
 
 Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` to turn it on. Then, for every agent send regardless of `target`:
@@ -62,7 +77,7 @@ The client's idempotency key must survive process death:
 1. Before the FIRST send attempt, persist (intent, idempotency_key) to a local outbox. Generate the key once per logical message.
 2. On ambiguous failure (timeout, 5xx, network error), keep the outbox entry pending and re-query with the same key. Never mint a new key for the same logical message.
 3. On restart, reload the outbox and finish pending entries with their stored keys (`flush_outbox`).
-4. Mark an entry done only on a terminal server answer (`sent`, `failed:`, or `duplicated` with a terminal stored status).
+4. Mark an entry done only on a terminal server answer (`sent`, `failed:`, `blocked:`, a 409 key conflict, or `duplicated` with a terminal stored status). `pending`, `unconfirmed`, an unknown status, a 5xx and a timeout are not terminal: keep the entry and re-query with the same key.
 
 `examples/relay_client.py` implements all of this and `examples/test_pickle_relay.py` tests it, including a crash-after-server-accept recovery check.
 
