@@ -69,4 +69,4 @@ Never resend with a new idempotency key after an ambiguous failure (timeout, 5xx
 
 ## License
 
-MIT (see LICENSE); read [NOTICE.md](NOTICE.md) for provenance first. Sender labels (`instinct`, `pickle`) are just configurable examples of "agent A" and "agent B"; rename freely.
+MIT (see LICENSE). Provenance: [NOTICE.md](NOTICE.md). Sender labels (`instinct`, `pickle`) are just configurable examples of "agent A" and "agent B"; rename freely.
