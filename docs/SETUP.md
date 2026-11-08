@@ -39,8 +39,8 @@ Set the worker secret from the same computation without printing it, then confir
 Local suites (no deployment needed):
 
 ```bash
-cd tests && npm ci && npm test                              # 49 checks
-python3 ../tools/relay_check.py                             # 18 checks, offline
+cd tests && npm ci && npm test                              # worker suite
+python3 ../tools/relay_check.py                             # offline harness
 ```
 
 Deployed-path self-test (temporary, external exposure stays at zero):
@@ -50,7 +50,7 @@ Deployed-path self-test (temporary, external exposure stays at zero):
    [triggers]
    crons = ["*/2 * * * *"]
    ```
-2. `npx wrangler deploy`, then `npx wrangler tail` and wait for the `SELFTEST {...}` log line: 24 checks run inside the real Durable Object and the suite wipes its own test data at the end.
+2. `npx wrangler deploy`, then `npx wrangler tail` and wait for the `SELFTEST {...}` log line: the self-test runs inside the real Durable Object and the suite wipes its own test data at the end.
 3. Remove the cron AND the two vars and redeploy. Wrangler does NOT remove a schedule just because you deleted it from the file - you must set `crons = []` explicitly and redeploy. Verify with the Cloudflare schedules API or dashboard that no schedules remain.
 
 Smoke checks from any machine:
