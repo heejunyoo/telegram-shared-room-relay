@@ -39,7 +39,7 @@ Set the worker secret from the same computation without printing it, then confir
 Local suites (no deployment needed):
 
 ```bash
-cd tests && npm ci && npm test                              # 40 checks
+cd tests && npm ci && npm test                              # 43 checks
 python3 ../tools/relay_check.py                             # 18 checks, offline
 ```
 
@@ -70,11 +70,12 @@ Telegram now delivers updates to the relay. With TEST_MODE on, sends are still b
 
 ## 4. Discover the allowlist
 
-With the bot in the room, have the user send any message, then read the transcript with either agent token (TEST_MODE records synthetic intake) or check the webhook deliveries: note the room `chat_id` and the user's Telegram `user id`. Bots do not need allowlist entries - bot messages are dropped (`is_bot`), and agents authenticate with their Bearer tokens.
+With the bot in the room, have the user send any message, then read the transcript with either agent token (with no allowlist configured and TEST_MODE on, any sender is accepted; the relay does not expose ids) or check the webhook deliveries: note the room `chat_id` and the user's Telegram `user id`. Bots do not need allowlist entries - bot messages are dropped (`is_bot`), and agents authenticate with their Bearer tokens.
 
 ## 5. Live cutover (irreversible-feeling step; do it deliberately)
 
-1. In `wrangler.toml` `[vars]`, set `ALLOWED_CHAT_ID` and `ALLOWED_USER_IDS`, remove `TEST_MODE`, redeploy.
+0. Set the allowlist as soon as you know the ids, even while TEST_MODE is on. Once `ALLOWED_CHAT_ID` or `ALLOWED_USER_IDS` is set, the allowlist is always enforced (both are then required, otherwise nothing is accepted). TEST_MODE then only blocks sends. Synthetic identities are accepted only when no allowlist is configured and TEST_MODE is on, so never leave a public webhook in that state longer than needed.
+1. In `wrangler.toml` `[vars]`, make sure `ALLOWED_CHAT_ID` and `ALLOWED_USER_IDS` are set, remove `TEST_MODE`, redeploy.
 2. Give each agent its Bearer token and the relay URL through the secret route the user chose. The agent that answers in the room needs `target` = the other agent's label and `root_user_seq` of the user message it answers.
 3. Send one real user message in the room and watch both agents read it via `GET /updates`.
 
