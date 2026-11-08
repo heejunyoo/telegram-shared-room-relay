@@ -59,10 +59,12 @@ function allowlistOk(msg, env) {
   return true;
 }
 
-var handler = {
-  async fetch(request, env) {
+// room: 대화록 DO 이름. 운영은 항상 "shared-room". 셀프테스트는 일회용 별도 이름을
+// 쓰므로 운영 대화록과 절대 같은 DO를 건드리지 않는다.
+async function relayFetch(request, env, room) {
+  {
     var url = new URL(request.url);
-    var stub = env.TRANSCRIPT.get(env.TRANSCRIPT.idFromName("shared-room"));
+    var stub = env.TRANSCRIPT.get(env.TRANSCRIPT.idFromName(room));
 
     // 1) 텔레그램 웹훅: 사용자 메시지 수신 (비밀 경로 보호)
     if (request.method === "POST" &&
@@ -115,6 +117,12 @@ var handler = {
           idempotency_key: body.idempotency_key }) });
     }
     return json({ ok: false, error: "not_found" }, 404);
+  }
+}
+
+var handler = {
+  async fetch(request, env) {
+    return relayFetch(request, env, "shared-room");
   },
 
   // 시험 배포 검증용: SELFTEST=1 + cron 트리거가 있을 때만 동작.
@@ -189,11 +197,30 @@ export class Transcript {
       // 멱등 키 확인이 왕복 제한보다 먼저: 완료된 전송의 같은-키 재시도는
       // 제한 계산과 무관하게 기존 결과를 그대로 돌려준다.
       var dup = Array.from(this.sql.exec(
-        "SELECT seq, send_status FROM messages WHERE idem_key = ?",
+        "SELECT seq, send_status, sender, target, text, reply_to, " +
+        "root_user_seq FROM messages WHERE idem_key = ?",
         b.idempotency_key));
-      if (dup.length)   // 멱등 키: 재전송 없이 기존 결과 반환
-        return json({ ok: true, seq: dup[0].seq,
-          duplicated: true, telegram_status: dup[0].send_status });
+      if (dup.length) {
+        var d0 = dup[0];
+        // 키는 (보낸 에이전트, 발송 의도)에 묶인다. 다른 에이전트가 같은 키를 쓰면
+        // 기존 기록의 seq/status를 알려주지 않고 충돌로만 답한다.
+        if (d0.sender !== b.sender)
+          return json({ ok: false, error: "idempotency_key_conflict" }, 409);
+        // 같은 에이전트라도 내용, 대상, root, reply_to 중 하나라도 다르면 같은 의도의
+        // 재시도가 아니다. 저장된 기록의 필드와 그대로 비교한다(기존 행도 같은 열을 가짐).
+        // 빈 값 표현(null/undefined/0)은 null로 맞춰 비교한다.
+        var nz = function (v) { return v === null || v === undefined ||
+          v === "" || Number(v) === 0 ? null : Number(v); };
+        if (String(d0.text) !== String(b.text) ||
+            String(d0.target || "all") !== String(b.target || "all") ||
+            nz(d0.reply_to) !== nz(b.reply_to) ||
+            nz(d0.root_user_seq) !== nz(b.root_user_seq))
+          return json({ ok: false, error: "idempotency_key_reused_with_" +
+            "different_request" }, 409);
+        // 진짜 같은 재시도: 재전송 없이 기존 결과 반환
+        return json({ ok: true, seq: d0.seq,
+          duplicated: true, telegram_status: d0.send_status });
+      }
       // 선택적 응답 정책(MIN_ROOT_USER_SEQ 또는 MAX_REPLIES_PER_USER_MSG 설정 시):
       // 모든 발신은 사용자 메시지(root)에 대한 답이어야 하고(먼저 말 걸기 금지),
       // 활성화 이전 메시지에는 답할 수 없으며, 에이전트별로 사용자 메시지 1건당
@@ -267,6 +294,21 @@ export class Transcript {
     // 내부 전용 (워커의 scheduled 셀프테스트만 stub으로 호출; 공개 라우트 없음)
     if (url.pathname === "/selftest" && request.method === "POST") {
       var c = await request.json();
+      var isSt = Array.from(this.sql.exec(
+        "SELECT value FROM meta WHERE key = 'selftest'")).length > 0;
+      // init은 비어 있는 DO에만 허용한다. 운영 대화록(메시지 있음)은 시험용으로
+      // 표시될 수 없고, 표시되지 않은 DO에서는 fill/cleanup이 모두 거부된다.
+      if (c.cmd === "init") {
+        var cnt = Array.from(this.sql.exec(
+          "SELECT COUNT(*) AS c FROM messages"))[0].c;
+        if (cnt > 0 && !isSt)
+          return json({ ok: false, error: "selftest_refused_nonempty" }, 409);
+        this.sql.exec("INSERT OR REPLACE INTO meta(key, value) " +
+          "VALUES('selftest', '1')");
+        return json({ ok: true });
+      }
+      if (!isSt)
+        return json({ ok: false, error: "selftest_not_enabled" }, 403);
       if (c.cmd === "fill") {
         for (var i = 0; i < (c.n || 0); i++)
           this.append({ sender: c.sender || "user", target: "all",
@@ -277,7 +319,7 @@ export class Transcript {
       }
       if (c.cmd === "cleanup") {
         this.sql.exec("DELETE FROM messages");
-        this.sql.exec("DELETE FROM meta");
+        this.sql.exec("DELETE FROM meta WHERE key != 'selftest'");
         return json({ ok: true });
       }
       return json({ ok: false, error: "unknown_cmd" }, 400);
@@ -305,7 +347,9 @@ export class Transcript {
   async sendToTelegram(seq, b) {
     // 시험 모드: 실제 텔레그램 전송을 구조적으로 차단한다.
     // BOT_TOKEN이 나중에 실제 값으로 바뀌어도 TEST_MODE=1인 동안은 못 보냄.
-    if (this.env.TEST_MODE === "1") {
+    var stRoom = Array.from(this.sql.exec(
+      "SELECT value FROM meta WHERE key = 'selftest'")).length > 0;
+    if (this.env.TEST_MODE === "1" || stRoom) {
       this.sql.exec(
         "UPDATE messages SET send_status='blocked:test_mode' WHERE seq=?",
         seq);
@@ -359,7 +403,13 @@ export class Transcript {
 
 // 배포된 DO를 직접 구동하는 셀프테스트 (SELFTEST=1 일 때 cron이 실행)
 async function selfTest(env, ctx) {
-  var stub = env.TRANSCRIPT.get(env.TRANSCRIPT.idFromName("shared-room"));
+  // 운영 DO("shared-room")와 분리된 일회용 DO에서만 실행한다.
+  var room = "selftest-" + Date.now() + "-" +
+    Math.random().toString(36).slice(2, 10);
+  var stub = env.TRANSCRIPT.get(env.TRANSCRIPT.idFromName(room));
+  // 합성 신원은 일회용 방에서만: 이 env 사본은 이 함수 안에서만 쓰인다.
+  var stEnv = Object.assign({}, env, { TEST_MODE: "1",
+    ALLOWED_CHAT_ID: "", ALLOWED_USER_IDS: "" });
   var R = [];
   function t(name, cond, detail) {
     R.push({ name: name, pass: !!cond, detail: detail || null }); }
@@ -368,17 +418,19 @@ async function selfTest(env, ctx) {
       { method: "POST", body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json(); }); }
   function http(method, path, token, body) {  // 워커 공개 라우트 경유 호출
-    return handler.fetch(new Request("https://relay.test" + path, {
+    return relayFetch(new Request("https://relay.test" + path, {
       method: method,
       headers: { "content-type": "application/json",
         "Authorization": token ? "Bearer " + token : "" },
-      body: body ? JSON.stringify(body) : undefined }), env)
+      body: body ? JSON.stringify(body) : undefined }), stEnv, room)
       .then(async function (r) {
         var d = null; try { d = await r.json(); } catch (e) {}
         return { status: r.status, data: d }; });
   }
 
-  await dc("/selftest", { cmd: "cleanup" });
+  var init = await dc("/selftest", { cmd: "init" });
+  if (!init.ok) return { total: 0, failed: 1, failed_names: ["init_refused"],
+    results: [] };
 
   var r = await http("GET", "/updates?after=0", null);
   t("auth_no_token_401", r.status === 401);
