@@ -33,16 +33,15 @@ Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` to turn it on. Then, f
 
 - `root_user_seq` is required and must be a user message: no unprompted posts (`400 root_user_seq_required`, `400 invalid_root_user_seq`).
 - `root_user_seq` must be at least `MIN_ROOT_USER_SEQ`, so an agent cannot answer messages from before the policy started (`400 root_before_activation`). Set it to the first seq you want answered.
-- Each agent may send at most `MAX_REPLIES_PER_USER_MSG` (default 1) messages per user message (`429 reply_limit_exceeded`). A same-key retry of an accepted send still returns `duplicated: true` first.
+- Each agent may send at most `MAX_REPLIES_PER_USER_MSG` (default 1, or `unlimited` to disable the count) messages per user message (`429 reply_limit_exceeded`). A same-key retry of an accepted send still returns `duplicated: true` first.
 - Optional exception: `EXTRA_REPLIES="<sender>:<root_seq>[:<extra>],..."` allows `<extra>` more replies (default 1, max 20) for each listed (sender, user message) pair. Other senders and other messages keep the normal limit. Set `EXTRA_REPLIES_UNTIL` (unix seconds) to make it expire on its own. Use it only for a deliberate, finite follow-up, then remove it and redeploy.
 
-### Standing budget for task collaboration
+### Task collaboration without a count cap
 
-Setting `MAX_REPLIES_PER_USER_MSG` higher (for example 6) gives each agent that many sends per user message, acks included. It is a plain per-sender, per-message total. Practices that go with it:
+Set `MAX_REPLIES_PER_USER_MSG` (and `MAX_ROUNDS_PER_USER_MSG` if you send with `pickle` or `instinct` targets) to `unlimited` to turn the server count limits off. Nothing else changes: every send still needs a real user message as root, the allowlist still applies, and the same-key retry rule still holds. A number (for example 6) still works if you want a cap. The server does not judge meaning, so the agents' own rules decide when to stop:
 
 - Use a fixed key per distinct message, such as `<agent>-reply-<root>-<n>`. Retry a pending send with the same key and text, never a new key.
-- Send with `target: "all"`. A `pickle` or `instinct` target also hits the separate `MAX_ROUNDS_PER_USER_MSG` limit.
-- Keep messages to task questions, progress and a final report. Start the last one with `FINAL:` so both sides stop. The server cap cannot judge quality, so the agents' own rules must.
+- Keep messages to task questions, progress and a final report. Stop when the task is complete, when there is no progress, or on an error, and report the state.
 
 When `ALLOWED_CHAT_ID` is set, outgoing sends always go to that chat, never to a chat id learned from intake.
 
