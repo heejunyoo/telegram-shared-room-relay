@@ -255,6 +255,36 @@ const r4s = await (await mf4.dispatchFetch(base + "/send", { method: "POST", hea
 check("test mode + allowlist: send still blocked, no telegram call", r4s.telegram_status === "blocked:test_mode" && tgCalls === tgBefore4, JSON.stringify(r4s));
 await mf4.dispose();
 
+// 16) 응답 정책: root 필수, 활성화 이전 root 거부, 에이전트별 질문당 1회(대상 무관), 선제 발신 금지
+const mf5 = new Miniflare({
+  modules: true,
+  script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+  compatibilityDate: "2026-08-06",
+  durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+  fetchMock: mockAgent,
+  bindings: { PICKLE_TOKEN: "pickle-secret", INSTINCT_TOKEN: "instinct-secret", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "777", MIN_ROOT_USER_SEQ: "2" },
+});
+const hook5 = (id, text) => mf5.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: id, from: { id: 777, is_bot: false }, chat: { id: 555 }, date: 1794000050, text } }) });
+await hook5(801, "활성화 이전");
+await hook5(802, "활성화 이후 질문");
+const u5 = await (await mf5.dispatchFetch(base + "/updates?after=0", { headers: { Authorization: "Bearer pickle-secret" } })).json();
+const oldSeq = u5.messages.find((m) => m.text === "활성화 이전").seq;
+const newSeq = u5.messages.find((m) => m.text === "활성화 이후 질문").seq;
+const send5 = async (tok, body) => { const r = await mf5.dispatchFetch(base + "/send", { method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + tok }, body: JSON.stringify(body) }); return { status: r.status, data: await r.json() }; };
+let q = await send5("pickle-secret", { text: "선제", idempotency_key: "p-0" });
+check("policy: send without root rejected", q.status === 400 && q.data.error === "root_user_seq_required", JSON.stringify(q));
+q = await send5("pickle-secret", { text: "옛 질문", idempotency_key: "p-1", root_user_seq: oldSeq });
+check("policy: root before activation rejected", q.status === 400 && q.data.error === "root_before_activation", JSON.stringify(q));
+q = await send5("pickle-secret", { text: "답1", idempotency_key: "p-2", root_user_seq: newSeq });
+check("policy: first reply accepted", q.status === 200 && q.data.telegram_status === "blocked:test_mode", JSON.stringify(q));
+q = await send5("pickle-secret", { text: "답2", idempotency_key: "p-3", root_user_seq: newSeq });
+check("policy: second reply same agent same question rejected (target all)", q.status === 429 && q.data.error === "reply_limit_exceeded", JSON.stringify(q));
+q = await send5("pickle-secret", { text: "답1", idempotency_key: "p-2", root_user_seq: newSeq });
+check("policy: same-key retry returns duplicate, not 429", q.status === 200 && q.data.duplicated === true, JSON.stringify(q));
+q = await send5("instinct-secret", { text: "다른 에이전트 답", idempotency_key: "i-1", root_user_seq: newSeq });
+check("policy: other agent gets its own single reply", q.status === 200, JSON.stringify(q));
+await mf5.dispose();
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
