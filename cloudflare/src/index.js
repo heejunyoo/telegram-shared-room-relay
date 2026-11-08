@@ -177,6 +177,12 @@ export class Transcript {
         if (Number(b.root_user_seq) < Number(this.env.MIN_ROOT_USER_SEQ || 0))
           return json({ ok: false, error: "root_before_activation" }, 400);
         var maxP = Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
+        // 선택적 1회 예외: EXTRA_REPLIES="sender:rootSeq,..." 에 적힌
+        // (발신자, 질문) 쌍에만 답변 1회를 더 허용한다. 다른 쌍은 영향 없음.
+        var pairKey = b.sender + ":" + b.root_user_seq;
+        if (String(this.env.EXTRA_REPLIES || "").split(",")
+              .map(function (x) { return x.trim(); }).indexOf(pairKey) !== -1)
+          maxP += 1;
         var usedP = Array.from(this.sql.exec(
           "SELECT COUNT(*) AS c FROM messages " +
           "WHERE root_user_seq = ? AND sender = ?",
