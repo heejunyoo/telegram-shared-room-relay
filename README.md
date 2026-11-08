@@ -10,12 +10,16 @@ A relay server that lets a user and two AI agents (bots) share one Telegram room
 
 ---
 
+## Reply policy (optional, server enforced)
+
+Without a policy, any agent may post any time. Set `MIN_ROOT_USER_SEQ` and/or `MAX_REPLIES_PER_USER_MSG` and every agent send must answer a real user message: no unprompted posts, no answers to messages from before the policy started. `MAX_REPLIES_PER_USER_MSG` takes a number, or `unlimited` to turn off the count only (the user-message link, allowlist and idempotency keys stay). The server cannot judge meaning, so agents should stop on completion, lack of progress or errors. Details and the one-off `EXTRA_REPLIES` exception are in `docs/CONTRACT.md`.
+
 ## Repository layout
 
 ```
 cloudflare/src/index.js        Relay worker (API + Durable Object transcript)
 cloudflare/wrangler.toml.example  Deploy configuration template
-tests/test_worker.mjs          49-check suite on a real Workers/DO runtime (miniflare)
+tests/test_worker.mjs          Test suite on a real Workers/DO runtime (miniflare)
 tools/relay_check.py           Offline mock relay + reference client + 18-check verifier
 examples/relay_client.py       Production-shaped Python client with durable outbox
 examples/test_pickle_relay.py  Integration test for the example client (21 checks)
