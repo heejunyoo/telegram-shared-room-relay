@@ -232,6 +232,29 @@ const r3d = await r3.json();
 check("test mode: telegram send structurally blocked", r3d.telegram_status === "blocked:test_mode" && tgCalls === tgBefore, JSON.stringify(r3d));
 await mf3.dispose();
 
+// 15) TEST_MODE + 허용 목록 설정: 허용 목록은 항상 강제, 전송은 계속 차단
+const mf4 = new Miniflare({
+  modules: true,
+  script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+  compatibilityDate: "2026-08-06",
+  durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+  fetchMock: mockAgent,
+  bindings: { PICKLE_TOKEN: "pickle-secret", INSTINCT_TOKEN: "instinct-secret", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "777" },
+});
+const hook4 = (id, from, chat, text) => mf4.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: id, from: { id: from, is_bot: false }, chat: { id: chat }, date: 1794000040, text } }) });
+await hook4(701, 777, 555, "허용된 사용자");
+await hook4(702, 888, 555, "같은 방 다른 사용자");
+await hook4(703, 777, 999, "다른 방 허용 사용자");
+await hook4(704, 12345, 99999, "합성 신원");
+const r4 = await (await mf4.dispatchFetch(base + "/updates?after=0", { headers: { Authorization: "Bearer pickle-secret" } })).json();
+const t4 = r4.messages.map((m) => m.text);
+check("test mode + allowlist: expected ids accepted", t4.includes("허용된 사용자"), JSON.stringify(t4));
+check("test mode + allowlist: outsiders rejected", t4.length === 1, JSON.stringify(t4));
+const tgBefore4 = tgCalls;
+const r4s = await (await mf4.dispatchFetch(base + "/send", { method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer pickle-secret" }, body: JSON.stringify({ text: "차단 유지", idempotency_key: "tm-2" }) })).json();
+check("test mode + allowlist: send still blocked, no telegram call", r4s.telegram_status === "blocked:test_mode" && tgCalls === tgBefore4, JSON.stringify(r4s));
+await mf4.dispose();
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
