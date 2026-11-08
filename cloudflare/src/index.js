@@ -163,6 +163,28 @@ export class Transcript {
       if (dup.length)   // 멱등 키: 재전송 없이 기존 결과 반환
         return json({ ok: true, seq: dup[0].seq,
           duplicated: true, telegram_status: dup[0].send_status });
+      // 선택적 응답 정책(MIN_ROOT_USER_SEQ 또는 MAX_REPLIES_PER_USER_MSG 설정 시):
+      // 모든 발신은 사용자 메시지(root)에 대한 답이어야 하고(먼저 말 걸기 금지),
+      // 활성화 이전 메시지에는 답할 수 없으며, 에이전트별로 사용자 메시지 1건당
+      // 대상과 무관하게 MAX_REPLIES_PER_USER_MSG(기본 1)회까지만 보낼 수 있다.
+      if (this.env.MIN_ROOT_USER_SEQ || this.env.MAX_REPLIES_PER_USER_MSG) {
+        if (!b.root_user_seq)
+          return json({ ok: false, error: "root_user_seq_required" }, 400);
+        var proot = Array.from(this.sql.exec(
+          "SELECT sender FROM messages WHERE seq = ?", b.root_user_seq));
+        if (!proot.length || proot[0].sender !== "user")
+          return json({ ok: false, error: "invalid_root_user_seq" }, 400);
+        if (Number(b.root_user_seq) < Number(this.env.MIN_ROOT_USER_SEQ || 0))
+          return json({ ok: false, error: "root_before_activation" }, 400);
+        var maxP = Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
+        var usedP = Array.from(this.sql.exec(
+          "SELECT COUNT(*) AS c FROM messages " +
+          "WHERE root_user_seq = ? AND sender = ?",
+          b.root_user_seq, b.sender))[0].c;
+        if (usedP >= maxP)
+          return json({ ok: false, error: "reply_limit_exceeded",
+            root_user_seq: b.root_user_seq }, 429);
+      }
       if (b.target === "pickle" || b.target === "instinct") {
         if (!b.root_user_seq)
           return json({ ok: false, error: "root_user_seq_required" }, 400);
@@ -238,8 +260,11 @@ export class Transcript {
         seq);
       return "blocked:test_mode";
     }
-    var chat = Array.from(this.sql.exec(
-      "SELECT value FROM meta WHERE key = 'chat_id'"));
+    // 허용 방이 설정되어 있으면 저장된 chat_id가 아니라 항상 그 방으로만 보낸다.
+    var chat = this.env.ALLOWED_CHAT_ID
+      ? [{ value: String(this.env.ALLOWED_CHAT_ID) }]
+      : Array.from(this.sql.exec(
+        "SELECT value FROM meta WHERE key = 'chat_id'"));
     if (!chat.length) {
       this.sql.exec(
         "UPDATE messages SET send_status='failed:no_chat_id' WHERE seq=?",
