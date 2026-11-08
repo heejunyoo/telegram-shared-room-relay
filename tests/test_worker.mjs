@@ -463,6 +463,12 @@ async function mkExtra(extra, until) {
   // 사용자(웹훅) 행의 키를 에이전트가 쓸 수 없다
   const tgk = await c("POST", "/send", "pk", { text: "q1", idempotency_key: "tg:11" });
   check("idem: agent cannot probe user-row key", tgk.status === 409 && tgk.data.seq === undefined, JSON.stringify(tgk));
+  const pre = await c("POST", "/send", "pk", { text: "x", idempotency_key: "tg:9999" });
+  const preU = await c("POST", "/send", "pk", { text: "x", idempotency_key: " TG:9999" });
+  check("idem: agent cannot pre-claim a future tg: webhook key", pre.status === 400 && preU.status === 400, JSON.stringify([pre, preU]));
+  await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: 9999, from: { id: 7, is_bot: false }, chat: { id: 555 }, date: 1794000999, text: "real user msg" } }) });
+  const after = await c("GET", "/updates?after=0", "in");
+  check("idem: real user message with that id still ingested", after.data.messages.some((x) => x.text === "real user msg"));
   await m.dispose();
 }
 
