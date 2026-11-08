@@ -11,6 +11,9 @@ compatibility_flags = ["nodejs_compat"]
 # configured. Remove it (or set "0") only at live cutover.
 [vars]
 TEST_MODE = "1"
+# Optional reply policy (see docs/CONTRACT.md):
+# MIN_ROOT_USER_SEQ = "1"          # agents may only answer user messages with seq >= this
+# MAX_REPLIES_PER_USER_MSG = "1"   # per agent, per user message, any target
 # Optional tuning:
 # MAX_ROUNDS_PER_USER_MSG = "1"   # agent replies allowed per user message, per agent
 # TG_TIMEOUT_MS = "10000"         # Telegram send timeout; on timeout the send is "unconfirmed"
