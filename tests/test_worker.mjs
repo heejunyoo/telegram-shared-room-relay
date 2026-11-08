@@ -312,6 +312,35 @@ q = await send6("instinct-secret", { text: "2", idempotency_key: "e-7", root_use
 check("extra: other question not widened", q.status === 429, JSON.stringify(q));
 await mf6.dispose();
 
+// 16c) 추가 횟수 지정, 만료
+async function mkExtra(extra, until) {
+  const m = new Miniflare({
+    modules: true,
+    script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+    compatibilityDate: "2026-08-06",
+    durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+    fetchMock: mockAgent,
+    bindings: Object.assign({ PICKLE_TOKEN: "pickle-secret", INSTINCT_TOKEN: "instinct-secret", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "777", MIN_ROOT_USER_SEQ: "1", EXTRA_REPLIES: extra }, until ? { EXTRA_REPLIES_UNTIL: until } : {}),
+  });
+  await m.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: 951, from: { id: 777, is_bot: false }, chat: { id: 555 }, date: 1794000070, text: "질문" } }) });
+  const s = async (tok, k) => (await m.dispatchFetch(base + "/send", { method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + tok }, body: JSON.stringify({ text: "x", idempotency_key: k, root_user_seq: 1 }) })).status;
+  return { m, s };
+}
+{
+  const { m, s } = await mkExtra("instinct:1:3,pickle:1:2", String(Math.floor(Date.now() / 1000) + 3600));
+  const iSt = []; for (let n = 0; n < 5; n++) iSt.push(await s("instinct-secret", "i" + n));
+  const pSt = []; for (let n = 0; n < 4; n++) pSt.push(await s("pickle-secret", "p" + n));
+  check("extra count: instinct 1+3 allowed then 429", JSON.stringify(iSt) === "[200,200,200,200,429]", JSON.stringify(iSt));
+  check("extra count: pickle 1+2 allowed then 429", JSON.stringify(pSt) === "[200,200,200,429]", JSON.stringify(pSt));
+  await m.dispose();
+}
+{
+  const { m, s } = await mkExtra("instinct:1:3", String(Math.floor(Date.now() / 1000) - 5));
+  const st = []; for (let n = 0; n < 2; n++) st.push(await s("instinct-secret", "x" + n));
+  check("extra expiry: expired exception ignored", JSON.stringify(st) === "[200,429]", JSON.stringify(st));
+  await m.dispose();
+}
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
