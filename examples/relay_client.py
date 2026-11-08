@@ -12,6 +12,8 @@ scripts/relay_client.py - 피클 측 텔레그램 공용 방 중계 클라이언
 4. 상태 확정: duplicated:true 자체로 완료 판단하지 않고 telegram_status를 검증.
    - unconfirmed: 미확정 상태 유지 및 동일 키로 재확인
    - sent: 텔레그램 API가 수락함 (confirmed 처리, 수신자 단말 도달 확인은 아님)
+   - blocked:*: 서버가 전송을 막음 (blocked 종결), pending/알 수 없는 상태는 같은 키로 재확인
+   - 409: 키 충돌 (conflict 종결, 새 키 자동 재전송 금지)
    - failed: 확정 실패 (failed) 처리. 새 키로 자동 재전송 절대 금지
 5. 거버넌스: target 및 root_user_seq 명시, 에이전트 간 핑퐁 1회 제한.
 """
@@ -24,6 +26,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+# 같은 키로 다시 확인할 상태. confirmed/failed/blocked/rejected/conflict는 종결.
+RECOVERABLE = ("pending", "unconfirmed", "unknown")
 DEFAULT_STATE_PATH = Path(__file__).parent / "relay_cursor.json"
 DEFAULT_OUTBOX_PATH = Path(__file__).parent / "relay_outbox.json"
 
@@ -168,7 +172,9 @@ class PickleRelayClient:
 
         # 4xx 클라이언트 에러 (예: 429 한도 초과 등)
         if status != 200:
-            item["status"] = "rejected"
+            # 409는 같은 키가 다른 발송 의도(또는 다른 에이전트)에 이미 쓰였다는 뜻.
+            # 새 키로 자동 재전송하지 않는다. 사람이 확인할 종결 상태로 둔다.
+            item["status"] = "conflict" if status == 409 else "rejected"
             item["error"] = res.get("error")
             self._save_outbox()
             return status, res
@@ -193,9 +199,14 @@ class PickleRelayClient:
         elif tg_status.startswith("failed:"):
             # failed 확정: 새 키로 재전송하지 않고 영속적 실패 완료 처리
             item["status"] = "failed"
+        elif tg_status.startswith("blocked:"):
+            # 서버가 Telegram 전송을 막은 상태(예: 시험 모드). 종결, 재전송 없음.
+            item["status"] = "blocked"
         elif tg_status == "unconfirmed":
             item["status"] = "unconfirmed"
         else:
+            # pending 또는 알 수 없는 상태: 종결로 간주하지 않는다.
+            # 같은 키로만 다시 확인하고 새 키로 보내지 않는다.
             item["status"] = "unknown"
 
         self._save_outbox()
@@ -237,12 +248,12 @@ class PickleRelayClient:
 
     def flush_outbox(self):
         """
-        재시작 시 또는 주기적 점검 시 미완결(pending, unconfirmed) 항목을
+        재시작 시 또는 주기적 점검 시 미완결(pending, unconfirmed, unknown) 항목을
         저장된 동일 idempotency_key로 안전하게 재확인/재전송한다.
         """
         results = []
         for key, item in list(self.outbox.items()):
-            if item.get("status") in ("pending", "unconfirmed"):
+            if item.get("status") in RECOVERABLE:
                 status, res = self._execute_send_item(item)
                 results.append((key, status, res))
         return results
