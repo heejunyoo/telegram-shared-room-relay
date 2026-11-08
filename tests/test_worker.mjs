@@ -285,6 +285,33 @@ q = await send5("instinct-secret", { text: "다른 에이전트 답", idempotenc
 check("policy: other agent gets its own single reply", q.status === 200, JSON.stringify(q));
 await mf5.dispose();
 
+// 16b) 예외: EXTRA_REPLIES 로 지정한 (발신자, 질문) 쌍만 추가 1회 허용
+const mf6 = new Miniflare({
+  modules: true,
+  script: readFileSync(new URL("../cloudflare/src/index.js", import.meta.url), "utf8"),
+  compatibilityDate: "2026-08-06",
+  durableObjects: { TRANSCRIPT: { className: "Transcript", useSQLite: true } },
+  fetchMock: mockAgent,
+  bindings: { PICKLE_TOKEN: "pickle-secret", INSTINCT_TOKEN: "instinct-secret", BOT_TOKEN: "TESTTOKEN", WEBHOOK_SECRET: "hooksecret", TEST_MODE: "1", ALLOWED_CHAT_ID: "555", ALLOWED_USER_IDS: "777", MIN_ROOT_USER_SEQ: "1", EXTRA_REPLIES: "instinct:1" },
+});
+const hook6 = (id, text) => mf6.dispatchFetch(base + "/tg/hooksecret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: { message_id: id, from: { id: 777, is_bot: false }, chat: { id: 555 }, date: 1794000060, text } }) });
+await hook6(901, "질문 A");
+await hook6(902, "질문 B");
+const send6 = async (tok, body) => { const r = await mf6.dispatchFetch(base + "/send", { method: "POST", headers: { "content-type": "application/json", Authorization: "Bearer " + tok }, body: JSON.stringify(body) }); return { status: r.status, data: await r.json() }; };
+q = await send6("instinct-secret", { text: "1", idempotency_key: "e-1", root_user_seq: 1 });
+check("extra: first reply accepted", q.status === 200, JSON.stringify(q));
+q = await send6("instinct-secret", { text: "2", idempotency_key: "e-2", root_user_seq: 1 });
+check("extra: listed pair gets exactly one more", q.status === 200, JSON.stringify(q));
+q = await send6("instinct-secret", { text: "3", idempotency_key: "e-3", root_user_seq: 1 });
+check("extra: third reply rejected", q.status === 429, JSON.stringify(q));
+q = await send6("pickle-secret", { text: "1", idempotency_key: "e-4", root_user_seq: 1 });
+q = await send6("pickle-secret", { text: "2", idempotency_key: "e-5", root_user_seq: 1 });
+check("extra: other sender not widened", q.status === 429, JSON.stringify(q));
+q = await send6("instinct-secret", { text: "1", idempotency_key: "e-6", root_user_seq: 2 });
+q = await send6("instinct-secret", { text: "2", idempotency_key: "e-7", root_user_seq: 2 });
+check("extra: other question not widened", q.status === 429, JSON.stringify(q));
+await mf6.dispose();
+
 function armTgMany(n) { for (let i = 0; i < n; i++) armTg(); }
 
 console.log("\n" + failures.length + " failures");
