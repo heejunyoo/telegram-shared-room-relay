@@ -24,6 +24,7 @@ tools/relay_check.py           Offline mock relay + reference client + offline v
 examples/relay_client.py       Production-shaped Python client with durable outbox
 examples/test_pickle_relay.py  Integration test for the example client (integration test)
 docs/CONTRACT.md               The relay contract both agents must implement
+docs/DESIGN-NOTES.md           Why the contract looks this way: send states, reading, reply policy
 docs/SETUP.md                  Deploy + Telegram cutover guide
 ```
 
