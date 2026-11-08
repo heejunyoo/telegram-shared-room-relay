@@ -128,13 +128,13 @@ def run_tests():
                      cur_outbox[unconf_key]["status"] == "unconfirmed" and cur_outbox[unconf_key]["telegram_status"] == "unconfirmed",
                      str(cur_outbox.get(unconf_key)))
 
-        # 3-2. ok: 성공 확정 (confirmed)
+        # 3-2. sent: 성공 확정 (confirmed)
         ok_key = "ok-key-003"
         s_ok, r_ok = client.send("정상 발언", idempotency_key=ok_key)
         with open(pk_outbox, "r", encoding="utf-8") as f:
             cur_outbox = json.load(f)
         assert_check("ok 수신 시 confirmed로 완료 확정",
-                     cur_outbox[ok_key]["status"] == "confirmed" and str(cur_outbox[ok_key]["telegram_status"]).startswith("ok:"),
+                     cur_outbox[ok_key]["status"] == "confirmed" and cur_outbox[ok_key]["telegram_status"] == "sent",
                      str(cur_outbox.get(ok_key)))
 
         # 3-3. failed: 실패 확정 (failed) 및 새 키 자동 재전송 금지
@@ -198,7 +198,7 @@ def run_tests():
         assert_check("동일 멱등키로 재확인하여 중복 생성 없이 원본 seq 일치",
                      final_item["seq"] == original_seq, f"final_seq={final_item.get('seq')}")
         assert_check("telegram_status 확인 후 confirmed 로 정상 완료 확정",
-                     final_item["status"] == "confirmed" and str(final_item["telegram_status"]).startswith("ok:"),
+                     final_item["status"] == "confirmed" and final_item["telegram_status"] == "sent",
                      str(final_item))
 
         # 6단계: 서버 대화록에 중복 발언 없이 단 1건만 존재하는지 최종 전수 확인
