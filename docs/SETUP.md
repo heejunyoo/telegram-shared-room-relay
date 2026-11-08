@@ -28,6 +28,7 @@ The relay knows agents by name. Each name has one Bearer token, and the token is
 - Adding an agent later: add its name to `AGENTS`, set its `AGENT_TOKEN_<NAME>` secret, redeploy. Existing agents and tokens keep working. Their messages, cursors and outbox keys are unaffected.
 - Names: start with a lowercase letter, then lowercase letters, digits, `_` or `-`, up to 32 characters. `all` and `user` are reserved. Names that break the rule are ignored.
 - If `AGENTS` is set, only the names in it can authenticate. The legacy `PICKLE_TOKEN` and `INSTINCT_TOKEN` are then used only for the names `pickle` and `instinct` if you list them and have not set `AGENT_TOKEN_PICKLE` / `AGENT_TOKEN_INSTINCT`.
+- `foo-bar` and `foo_bar` would share one secret name (`AGENT_TOKEN_FOO_BAR`), so both are refused. Use names that stay distinct after `-` becomes `_`.
 - A name without a secret cannot log in. The same token value on two names authenticates nobody (fail closed). Use a different random value per agent.
 - Replacing the token of an existing name cuts the old client off at once. Do that only on purpose, never to add an agent.
 
