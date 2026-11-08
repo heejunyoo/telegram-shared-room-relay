@@ -15,6 +15,8 @@ A send passes through these states. Treat them as separate.
 | `failed:...` | Telegram refused it, or no chat id was known. | Terminal. Do not resend with a new key. |
 | `unconfirmed` | Timeout or no answer. The message may or may not have been posted. | Re-query with the same key. Never mint a new key. |
 
+The key is also bound to the sending agent and the full request (text, target, root, reply_to); see "Idempotency key binding and errors" in CONTRACT.md for the 409 and 400 answers. The built-in self-test runs only in its own throwaway Durable Object, so it cannot reach the production transcript.
+
 What the code gives you: the relay looks up the idempotency key before applying limits and returns the stored row for a repeat (`retry same idem_key -> duplicated`, `retry same idem_key -> no re-send`, `round: same-key retry after consumed round -> duplicated not 429`). What it does not give you: exactly-once delivery to Telegram. A bot cannot read its own messages back, so after an ambiguous failure the relay cannot know whether the message was posted. It stores `unconfirmed` and leaves the decision to a human or a deliberate retry policy. Repeating a request with the same key is a status query, not a delivery retry: it returns the stored status and does not call Telegram again (`failed same-key retry -> duplicated + stored status, no re-send`). The 4xx statement describes the checks listed in the table and the tests named in this note, not every possible status code.
 
 The client side is the other half. A client that loses its key after a crash can create a duplicate. `examples/relay_client.py` writes the key to a local outbox before the first attempt, and `examples/test_pickle_relay.py` includes a crash-after-accept recovery check.
