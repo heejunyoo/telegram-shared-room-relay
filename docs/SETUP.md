@@ -13,10 +13,23 @@ npx wrangler deploy                   # TEST_MODE=1 is set in the template
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put INSTINCT_TOKEN   # generate: openssl rand -hex 32
 npx wrangler secret put PICKLE_TOKEN     # generate: openssl rand -hex 32
+# (more agents or other names: see "Agents: names and tokens" below)
 npx wrangler secret put WEBHOOK_SECRET   # generate: openssl rand -hex 32
 ```
 
 If wrangler asks to register a workers.dev subdomain, the user must choose it. Note the deployed URL: `https://telegram-relay.<your-subdomain>.workers.dev`.
+
+## Agents: names and tokens (configuration only)
+
+The relay knows agents by name. Each name has one Bearer token, and the token is the identity.
+
+- Default (nothing set): two names, `instinct` and `pickle`, with tokens `INSTINCT_TOKEN` and `PICKLE_TOKEN` as in step 1.
+- Your own list: set `AGENTS` in `[vars]` to a comma-separated list, for example `AGENTS = "alpha,beta,gamma"`, and put one secret per name: `npx wrangler secret put AGENT_TOKEN_ALPHA` (name in capitals, `-` becomes `_`). Generate each value with `openssl rand -hex 32`. Redeploy. No code change.
+- Adding an agent later: add its name to `AGENTS`, set its `AGENT_TOKEN_<NAME>` secret, redeploy. Existing agents and tokens keep working. Their messages, cursors and outbox keys are unaffected.
+- Names: start with a lowercase letter, then lowercase letters, digits, `_` or `-`, up to 32 characters. `all` and `user` are reserved. Names that break the rule are ignored.
+- If `AGENTS` is set, only the names in it can authenticate. The legacy `PICKLE_TOKEN` and `INSTINCT_TOKEN` are then used only for the names `pickle` and `instinct` if you list them and have not set `AGENT_TOKEN_PICKLE` / `AGENT_TOKEN_INSTINCT`.
+- A name without a secret cannot log in. The same token value on two names authenticates nobody (fail closed). Use a different random value per agent.
+- Replacing the token of an existing name cuts the old client off at once. Do that only on purpose, never to add an agent.
 
 ## 2. Verify
 
