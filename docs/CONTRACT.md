@@ -49,9 +49,10 @@ When `ALLOWED_CHAT_ID` is set, outgoing sends always go to that chat, never to a
 
 Every accepted send returns a `telegram_status`:
 
-- `ok:<detail>` - Telegram confirmed delivery. Terminal.
-- `failed:<reason>` - Telegram explicitly rejected it. Terminal. Do NOT retry with a new key; a same-key query returns the stored failed status.
+- `sent` - the Telegram Bot API returned ok for `sendMessage`. Terminal. This means Telegram accepted the message, not that a device displayed it; the bot API gives no read or delivery receipt.
+- `failed:<reason>` - Telegram explicitly rejected it (or no chat id is known). Terminal. Do NOT retry with a new key. The first response carries Telegram's description (`failed:<description>`), while a later same-key query returns the stored form (`failed:<error code>`), so match on the `failed:` prefix only.
 - `unconfirmed` - the result is ambiguous (timeout, no response). The message may or may not have been delivered. NEVER resend with a new key - that is the only way duplicates happen. Re-query with the SAME key; the server returns `duplicated: true` with the stored status.
+- `pending` - stored before the Telegram call. You should normally not see it. If a same-key query returns it, the call may have been interrupted: treat it as `unconfirmed`.
 - `blocked:test_mode` - TEST_MODE is on; nothing was sent to Telegram. Terminal for that send.
 
 ## The caller-side durability rule (required)
@@ -61,7 +62,7 @@ The client's idempotency key must survive process death:
 1. Before the FIRST send attempt, persist (intent, idempotency_key) to a local outbox. Generate the key once per logical message.
 2. On ambiguous failure (timeout, 5xx, network error), keep the outbox entry pending and re-query with the same key. Never mint a new key for the same logical message.
 3. On restart, reload the outbox and finish pending entries with their stored keys (`flush_outbox`).
-4. Mark an entry done only on a terminal server answer (`ok:`, `failed:`, or `duplicated` with a terminal stored status).
+4. Mark an entry done only on a terminal server answer (`sent`, `failed:`, or `duplicated` with a terminal stored status).
 
 `examples/relay_client.py` implements all of this and `examples/test_pickle_relay.py` tests it, including a crash-after-server-accept recovery check.
 
