@@ -1,0 +1,7 @@
+{
+  "name": "relay-worker",
+  "private": true,
+  "description": "Relay worker deploy tooling. Run: npm ci && npx wrangler deploy",
+  "engines": { "node": ">=22" },
+  "devDependencies": { "wrangler": "4.158.0" }
+}
