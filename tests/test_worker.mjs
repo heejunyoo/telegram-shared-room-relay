@@ -410,6 +410,13 @@ async function mkExtra(extra, until) {
   { const { m, c } = await mkReg({ AGENTS: "alpha,beta", AGENT_TOKEN_ALPHA: "same", AGENT_TOKEN_BETA: "same" });
     check("duplicate token fails closed", (await c("GET", "/updates?after=0", "same")).status === 401);
     await m.dispose(); }
+  // foo-bar 와 foo_bar 는 같은 비밀값 이름으로 겹치므로 둘 다 제외(fail closed), 다른 이름은 영향 없음
+  { const { m, c } = await mkReg({ AGENTS: "foo-bar, foo_bar ,Zed,zed,x".replace("x", "ok2") + "," + "a".repeat(33) + "," + "b".repeat(32), AGENT_TOKEN_FOO_BAR: "fb", AGENT_TOKEN_ZED: "z1", AGENT_TOKEN_OK2: "o2", ["AGENT_TOKEN_" + "B".repeat(32)]: "bmax", ["AGENT_TOKEN_" + "A".repeat(33)]: "atoolong" });
+    check("collision: foo-bar/foo_bar both refused", (await c("GET", "/updates?after=0", "fb")).status === 401);
+    check("collision: target of a colliding name rejected", (await c("POST", "/send", "o2", { text: "t", idempotency_key: "c1", target: "foo-bar", root_user_seq: 1 })).data.error === "invalid_target");
+    check("whitespace trimmed, case-folded, duplicates merged", (await c("GET", "/updates?after=0", "z1")).status === 200);
+    check("32-char name accepted, 33-char ignored", (await c("GET", "/updates?after=0", "bmax")).status === 200 && (await c("GET", "/updates?after=0", "atoolong")).status === 401);
+    await m.dispose(); }
   // 잘못된 이름(예약어, 형식 오류)은 무시, 토큰 미설정 이름은 접속 불가
   { const { m, c } = await mkReg({ AGENTS: "all,user,Bad Name,ok-1,nosecret", AGENT_TOKEN_ALL: "x", AGENT_TOKEN_USER: "y", AGENT_TOKEN_OK_1: "o1" });
     check("reserved names ignored", (await c("GET", "/updates?after=0", "x")).status === 401 && (await c("GET", "/updates?after=0", "y")).status === 401);
