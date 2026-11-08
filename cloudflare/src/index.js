@@ -19,7 +19,12 @@ function agentNames(env) {
     if (/^[a-z][a-z0-9_-]{0,31}$/.test(n) && RESERVED_NAMES.indexOf(n) === -1 &&
         out.indexOf(n) === -1) out.push(n);
   });
-  return out;
+  // "foo-bar"와 "foo_bar"는 같은 비밀값 이름(AGENT_TOKEN_FOO_BAR)을 가리켜 신원이
+  // 모호하다. 충돌하는 이름은 모두 제외한다(fail closed): 인증도, 대상 지정도 안 된다.
+  var keyOf = function (n) { return n.toUpperCase().replace(/-/g, "_"); };
+  return out.filter(function (n) {
+    return out.filter(function (o) { return keyOf(o) === keyOf(n); }).length === 1;
+  });
 }
 function agentToken(env, name) {
   var v = env["AGENT_TOKEN_" + name.toUpperCase().replace(/-/g, "_")];
