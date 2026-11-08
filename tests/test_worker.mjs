@@ -1,7 +1,7 @@
 // test_worker.mjs - cloudflare/src/index.js 를 miniflare(실제 Workers/DO 런타임)로 실행 검증
 import { Miniflare } from "miniflare";
-import { readFileSync } from "node:fs"; // npm install miniflare 후 실행;
-import { MockAgent, setGlobalDispatcher } from "miniflare/node_modules/undici/index.js";
+import { readFileSync } from "node:fs"; // npm ci 후 실행 (tests/ 에서);
+import { MockAgent, setGlobalDispatcher } from "undici";
 
 const failures = [];
 function check(name, cond, detail = "") {
