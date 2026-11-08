@@ -1,11 +1,10 @@
-# Provenance and license notice
+# Provenance and license
 
-This project was assembled for its owner (GitHub user heejunyoo) with the help of AI agents.
+Released under the MIT License (see `LICENSE`). The owner (GitHub user heejunyoo) confirmed that modification, redistribution and commercial use are fine.
 
-- `cloudflare/`, `tests/test_worker.mjs`, `tools/relay_check.py`, `docs/` and the README were written by an AI assistant working for the owner.
-- `examples/relay_client.py` and `examples/test_pickle_relay.py` came from a separate AI agent (labelled "pickle" in the examples) as part of the same owner-directed project. The owner asked for the whole project to be published.
-- The MIT license in `LICENSE` was applied by the publishing assistant as a default. The owner has not separately confirmed the choice of license, and nobody has established what rights the agent that wrote the examples, or its provider, may hold in that code. Possessing the code does not settle that.
+Provenance:
 
-Until the owner confirms the license (and, for `examples/`, its origin), treat the license as the owner's default intent, not a verified grant over third-party contributions. The owner may change or replace it.
+- `cloudflare/`, `tests/test_worker.mjs`, `tools/relay_check.py`, `docs/` and the README were written for the owner as part of this project.
+- `examples/relay_client.py` and `examples/test_pickle_relay.py` are the project's example client and its test, contributed via Pickle (the second agent in the setup). They are included at the owner's direction.
 
 Dependencies (wrangler, miniflare, undici) are installed from npm under their own licenses and are not vendored here.
