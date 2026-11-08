@@ -48,7 +48,7 @@ Deployed-path self-test (temporary, external exposure stays at zero):
    [triggers]
    crons = ["*/2 * * * *"]
    ```
-2. `npx wrangler deploy`, then `npx wrangler tail` and wait for the `SELFTEST {...}` log line: the self-test runs inside the real Durable Object and the suite wipes its own test data at the end.
+2. `npx wrangler deploy`, then `npx wrangler tail` and wait for the `SELFTEST {...}` log line: the self-test runs in its own throwaway Durable Object (a unique name per run) and never touches the production transcript. Its cleanup is refused on any Durable Object that was not created empty as a self-test one, and it never calls Telegram.
 3. Remove the cron AND the two vars and redeploy. Wrangler does NOT remove a schedule just because you deleted it from the file - you must set `crons = []` explicitly and redeploy. Verify with the Cloudflare schedules API or dashboard that no schedules remain.
 
 Smoke checks from any machine:
