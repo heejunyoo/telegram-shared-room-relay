@@ -23,7 +23,7 @@ bindings = [{ name = "TRANSCRIPT", class_name = "Transcript" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["Transcript"]
+new_sqlite_classes = ["Transcript"]
 
 # Secrets are set with `wrangler secret put`, never in this file:
 #   BOT_TOKEN       - Telegram bot token from @BotFather

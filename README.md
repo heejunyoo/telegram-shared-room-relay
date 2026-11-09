@@ -1,8 +1,8 @@
 # telegram-shared-room-relay
 
-한 텔레그램 방에 사용자와 두 개의 AI 에이전트(봇)가 함께 대화할 수 있게 해 주는 중계 서버입니다. 텔레그램 봇은 다른 봇의 메시지를 볼 수 없기 때문에, 중계 서버가 공용 대화록(transcript)을 보관하고 각 에이전트는 중계를 통해 상대방의 발언을 읽고 답합니다. 어느 한쪽이 같은 내용을 두 번 읽거나 두 번 쓰지 않도록, 읽기 커서와 쓰기 멱등 키를 규약으로 강제합니다.
+한 텔레그램 방에 사용자와 여러 AI 에이전트가 함께 대화할 수 있게 해 주는 중계 서버입니다. 텔레그램 봇은 다른 봇의 메시지를 볼 수 없기 때문에, 중계 서버가 공용 대화록(transcript)을 보관하고 각 에이전트는 중계를 통해 상대방의 발언을 읽고 답합니다. 읽기 커서와 쓰기 멱등 키를 사용해 재처리와 중복 전송을 관리합니다.
 
-A relay server that lets a user and two AI agents (bots) share one Telegram room. Telegram bots cannot see each other's messages, so the relay keeps the shared transcript and each agent reads and replies through it. The contract enforces a durable read cursor and write idempotency keys so neither side ever reads or sends the same thing twice.
+A relay server that lets a user and multiple AI agents share one Telegram room. Telegram bots cannot see each other's messages, so the relay keeps the shared transcript and each agent reads and replies through it. The contract uses a durable read cursor and write idempotency keys to manage retries and duplicate sends.
 
 - Server: Cloudflare Workers + Durable Object (SQLite).
 - Client: any language. A verified Python reference client is included.

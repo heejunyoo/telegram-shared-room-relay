@@ -192,6 +192,9 @@ export class Transcript {
 
     if (url.pathname === "/send" && request.method === "POST") {
       var b = await request.json();
+      var isSelfTest = Array.from(this.sql.exec(
+        "SELECT value FROM meta WHERE key = 'selftest'")).length > 0;
+      var policyEnv = isSelfTest ? {} : this.env;
       if (!b.idempotency_key)
         return json({ ok: false, error: "idempotency_key_required" }, 400);
       // 멱등 키 확인이 왕복 제한보다 먼저: 완료된 전송의 같은-키 재시도는
@@ -231,27 +234,27 @@ export class Transcript {
       // 모든 발신은 사용자 메시지(root)에 대한 답이어야 하고(먼저 말 걸기 금지),
       // 활성화 이전 메시지에는 답할 수 없으며, 에이전트별로 사용자 메시지 1건당
       // 대상과 무관하게 MAX_REPLIES_PER_USER_MSG(기본 1)회까지만 보낼 수 있다.
-      if (this.env.MIN_ROOT_USER_SEQ || this.env.MAX_REPLIES_PER_USER_MSG) {
+      if (policyEnv.MIN_ROOT_USER_SEQ || policyEnv.MAX_REPLIES_PER_USER_MSG) {
         if (!b.root_user_seq)
           return json({ ok: false, error: "root_user_seq_required" }, 400);
         var proot = Array.from(this.sql.exec(
           "SELECT sender FROM messages WHERE seq = ?", b.root_user_seq));
         if (!proot.length || proot[0].sender !== "user")
           return json({ ok: false, error: "invalid_root_user_seq" }, 400);
-        if (Number(b.root_user_seq) < Number(this.env.MIN_ROOT_USER_SEQ || 0))
+        if (Number(b.root_user_seq) < Number(policyEnv.MIN_ROOT_USER_SEQ || 0))
           return json({ ok: false, error: "root_before_activation" }, 400);
         // "unlimited" 로 설정하면 횟수 제한만 끈다(root 연결·allowlist는 그대로).
-        var unlimP = String(this.env.MAX_REPLIES_PER_USER_MSG || "")
+        var unlimP = String(policyEnv.MAX_REPLIES_PER_USER_MSG || "")
           .toLowerCase() === "unlimited";
         var maxP = unlimP ? Infinity
-          : Number(this.env.MAX_REPLIES_PER_USER_MSG || 1);
+          : Number(policyEnv.MAX_REPLIES_PER_USER_MSG || 1);
         // 선택적 예외: EXTRA_REPLIES="sender:rootSeq[:추가횟수],..." 에 적힌
         // (발신자, 질문) 쌍에만 답변을 추가 허용한다(횟수 생략 시 1). 다른 쌍은 영향 없음.
         // EXTRA_REPLIES_UNTIL(유닉스 초)이 지나면 예외는 자동으로 무효가 된다.
-        var untilSec = Number(this.env.EXTRA_REPLIES_UNTIL || 0);
+        var untilSec = Number(policyEnv.EXTRA_REPLIES_UNTIL || 0);
         if (!untilSec || Date.now() / 1000 < untilSec) {
           var pairPfx = b.sender + ":" + b.root_user_seq;
-          String(this.env.EXTRA_REPLIES || "").split(",").forEach(function (x) {
+          String(policyEnv.EXTRA_REPLIES || "").split(",").forEach(function (x) {
             var parts = x.trim().split(":");
             if (parts.length >= 2 && parts[0] + ":" + parts[1] === pairPfx) {
               var n = parts.length > 2 ? Number(parts[2]) : 1;
@@ -276,9 +279,9 @@ export class Transcript {
           return json({ ok: false, error: "invalid_root_user_seq" }, 400);
         // 서버 강제 왕복 제한: 에이전트 간 발언은 사용자 질문 1건당
         // 에이전트별 MAX_ROUNDS_PER_USER_MSG(기본 1)회까지
-        var maxR = String(this.env.MAX_ROUNDS_PER_USER_MSG || "")
+        var maxR = String(policyEnv.MAX_ROUNDS_PER_USER_MSG || "")
           .toLowerCase() === "unlimited" ? Infinity
-          : Number(this.env.MAX_ROUNDS_PER_USER_MSG || 1);
+          : Number(policyEnv.MAX_ROUNDS_PER_USER_MSG || 1);
         var used = Array.from(this.sql.exec(
           "SELECT COUNT(*) AS c FROM messages " +
           "WHERE root_user_seq = ? AND sender = ? " +
@@ -415,7 +418,10 @@ async function selfTest(env, ctx) {
   var stub = env.TRANSCRIPT.get(env.TRANSCRIPT.idFromName(room));
   // 합성 신원은 일회용 방에서만: 이 env 사본은 이 함수 안에서만 쓰인다.
   var stEnv = Object.assign({}, env, { TEST_MODE: "1",
-    ALLOWED_CHAT_ID: "", ALLOWED_USER_IDS: "" });
+    ALLOWED_CHAT_ID: "", ALLOWED_USER_IDS: "",
+    AGENTS: "instinct,pickle", INSTINCT_TOKEN: "selftest-instinct",
+    PICKLE_TOKEN: "selftest-pickle", AGENT_TOKEN_INSTINCT: "selftest-instinct",
+    AGENT_TOKEN_PICKLE: "selftest-pickle" });
   var R = [];
   function t(name, cond, detail) {
     R.push({ name: name, pass: !!cond, detail: detail || null }); }
@@ -442,19 +448,19 @@ async function selfTest(env, ctx) {
   t("auth_no_token_401", r.status === 401);
   r = await http("GET", "/updates?after=0", "wrong");
   t("auth_wrong_token_401", r.status === 401);
-  r = await http("GET", "/updates?after=0", env.INSTINCT_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.INSTINCT_TOKEN);
   t("auth_ok_200_empty", r.status === 200 && r.data.ok &&
     r.data.messages.length === 0);
 
-  r = await http("POST", "/send", env.INSTINCT_TOKEN,
+  r = await http("POST", "/send", stEnv.INSTINCT_TOKEN,
     { text: "st-1", idempotency_key: "st-1" });
   t("send_blocked_in_test_mode", r.status === 200 &&
     r.data.telegram_status === "blocked:test_mode", JSON.stringify(r.data));
   var s1 = r.data.seq;
-  r = await http("POST", "/send", env.INSTINCT_TOKEN,
+  r = await http("POST", "/send", stEnv.INSTINCT_TOKEN,
     { text: "st-1", idempotency_key: "st-1" });
   t("send_dup_same_seq", r.data.duplicated === true && r.data.seq === s1);
-  r = await http("POST", "/send", env.INSTINCT_TOKEN, { text: "x" });
+  r = await http("POST", "/send", stEnv.INSTINCT_TOKEN, { text: "x" });
   t("send_missing_key_400", r.status === 400 &&
     r.data.error === "idempotency_key_required");
 
@@ -465,7 +471,7 @@ async function selfTest(env, ctx) {
   await http("POST", hook, null, { message: { message_id: 900001,
     from: { id: 777, is_bot: false }, chat: { id: 555 },
     date: 1762600000, text: "user-q" } });
-  r = await http("GET", "/updates?after=0", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.PICKLE_TOKEN);
   var userMsgs = r.data.messages.filter(function (m) {
     return m.text === "user-q"; });
   t("webhook_recorded_once", userMsgs.length === 1);
@@ -478,7 +484,7 @@ async function selfTest(env, ctx) {
   await http("POST", hook, null, { message: { message_id: 900003,
     from: { id: 888, is_bot: false }, chat: { id: 555 },
     date: 1762600002, text: "wrong-user" } });
-  r = await http("GET", "/updates?after=0", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.PICKLE_TOKEN);
   var txts = r.data.messages.map(function (m) { return m.text; });
   // TEST_MODE=1에서는 합성 신원이 의도적으로 허용된다 (라이브 모드의
   // fail-closed 허용 목록 차단은 로컬 런타임 테스트 13번이 검증)
@@ -487,38 +493,38 @@ async function selfTest(env, ctx) {
   t("testmode_synthetic_user_allowed", txts.indexOf("wrong-user") !== -1);
 
   // 왕복 제한: 에이전트 간 발언은 사용자 질문 1건당 에이전트별 1회
-  r = await http("POST", "/send", env.PICKLE_TOKEN, { text: "p2i",
+  r = await http("POST", "/send", stEnv.PICKLE_TOKEN, { text: "p2i",
     target: "instinct", root_user_seq: sUser, idempotency_key: "st-2" });
   t("round_first_ok", r.status === 200, JSON.stringify(r.data));
-  r = await http("POST", "/send", env.PICKLE_TOKEN, { text: "p2i-again",
+  r = await http("POST", "/send", stEnv.PICKLE_TOKEN, { text: "p2i-again",
     target: "instinct", root_user_seq: sUser, idempotency_key: "st-3" });
   t("round_limit_429", r.status === 429 &&
     r.data.error === "round_limit_exceeded", JSON.stringify(r.data));
   // 소진된 왕복의 같은-키 재시도는 429가 아니라 duplicated + 저장된 상태
-  r = await http("POST", "/send", env.PICKLE_TOKEN, { text: "p2i",
+  r = await http("POST", "/send", stEnv.PICKLE_TOKEN, { text: "p2i",
     target: "instinct", root_user_seq: sUser, idempotency_key: "st-2" });
   t("round_retry_same_key_duplicated", r.status === 200 &&
     r.data.duplicated === true &&
     r.data.telegram_status === "blocked:test_mode", JSON.stringify(r.data));
-  r = await http("POST", "/send", env.INSTINCT_TOKEN, { text: "i2p",
+  r = await http("POST", "/send", stEnv.INSTINCT_TOKEN, { text: "i2p",
     target: "pickle", root_user_seq: sUser, idempotency_key: "st-4" });
   t("round_other_agent_ok", r.status === 200);
-  r = await http("POST", "/send", env.PICKLE_TOKEN, { text: "x",
+  r = await http("POST", "/send", stEnv.PICKLE_TOKEN, { text: "x",
     target: "instinct", idempotency_key: "st-5" });
   t("round_missing_root_400", r.status === 400 &&
     r.data.error === "root_user_seq_required");
-  r = await http("POST", "/send", env.PICKLE_TOKEN, { text: "x",
+  r = await http("POST", "/send", stEnv.PICKLE_TOKEN, { text: "x",
     target: "instinct", root_user_seq: 999999, idempotency_key: "st-6" });
   t("round_bad_root_400", r.status === 400 &&
     r.data.error === "invalid_root_user_seq");
 
   // 에코/타겟 필터
-  r = await http("GET", "/updates?after=0", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.PICKLE_TOKEN);
   t("echo_own_hidden", r.data.messages.every(function (m) {
     return m.sender !== "pickle"; }));
   t("target_hidden_from_nontarget", r.data.messages.every(function (m) {
     return m.text !== "p2i"; })); // pickle은 target=instinct 발언을 못 봄
-  r = await http("GET", "/updates?after=0", env.INSTINCT_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.INSTINCT_TOKEN);
   t("target_seen_by_instinct", r.data.messages.some(function (m) {
     return m.text === "p2i"; }));
   t("echo_instinct_own_hidden", r.data.messages.every(function (m) {
@@ -526,16 +532,16 @@ async function selfTest(env, ctx) {
 
   // 페이지네이션: 205건 채운 뒤 200 + 나머지
   await dc("/selftest", { cmd: "fill", n: 205, sender: "user" });
-  r = await http("GET", "/updates?after=0", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.PICKLE_TOKEN);
   var page1 = r.data;
   t("page1_200_has_more", page1.messages.length === 200 &&
     page1.has_more === true, "len=" + page1.messages.length);
   r = await http("GET", "/updates?after=" + page1.cursor,
-    env.PICKLE_TOKEN);
+    stEnv.PICKLE_TOKEN);
   t("page2_rest_no_more", r.data.messages.length > 0 &&
     r.data.has_more === false &&
     r.data.messages[0].seq > page1.cursor);
-  r = await http("GET", "/updates?after=999999", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=999999", stEnv.PICKLE_TOKEN);
   t("cursor_stays_when_empty", r.data.cursor === 999999 &&
     r.data.messages.length === 0);
 
@@ -545,7 +551,7 @@ async function selfTest(env, ctx) {
     try {
       var pr = await fetch(
         env.SELFTEST_ORIGIN.replace(/\/$/, "") + "/updates?after=0",
-        { headers: { Authorization: "Bearer " + env.INSTINCT_TOKEN } });
+        { headers: { Authorization: "Bearer " + agentToken(env, agentNames(env)[0] || "") } });
       t("public_url_auth_get", pr.status === 200, "status=" + pr.status);
     } catch (e) {
       t("public_url_auth_get", false, String(e));
@@ -553,7 +559,7 @@ async function selfTest(env, ctx) {
   }
 
   await dc("/selftest", { cmd: "cleanup" });
-  r = await http("GET", "/updates?after=0", env.PICKLE_TOKEN);
+  r = await http("GET", "/updates?after=0", stEnv.PICKLE_TOKEN);
   t("cleanup_empty", r.data.messages.length === 0);
 
   var failed = R.filter(function (x) { return !x.pass; });
