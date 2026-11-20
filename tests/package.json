@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Runtime tests for cloudflare/src/index.js on a real Workers/Durable Object runtime (miniflare). Run: npm ci && npm test",
   "scripts": {
-    "test": "node test_worker.mjs"
+    "test": "node test_worker.mjs && node test_selftest_policies.mjs"
   },
   "engines": {
     "node": ">=22"
